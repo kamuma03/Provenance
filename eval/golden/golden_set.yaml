@@ -1,0 +1,49 @@
+# Golden set — P1 seed (R40). Grows as real corpora are ingested; the P4 CI gate
+# scores these against the §9.2 thresholds. Source spans cite the document + page.
+items:
+  - id: sec-001
+    cohort: textual_factual
+    domain: sec_financial
+    question: "Who is the independent auditor named in the filing?"
+    expected: "Ernst & Young LLP"
+    answerable: true
+    source: { document: "demo-10k.pdf", page: 71, quote: "audited by Ernst & Young LLP" }
+
+  - id: sec-002
+    cohort: numeric_factual
+    domain: sec_financial
+    question: "What total revenue did the company report for fiscal 2022?"
+    expected: "$4.2B"
+    answerable: true
+    source: { document: "demo-10k.pdf", page: 32, quote: "Total revenue ... $4.2 billion" }
+
+  - id: sec-003
+    cohort: relational
+    domain: sec_financial
+    question: "Which risk factors were cited in the 2022 filing but not in 2021?"
+    expected: "Supply-chain disruption; foreign-exchange volatility"
+    answerable: true
+    source: { document: "demo-10k.pdf", page: 18, quote: "Risk Factors" }
+
+  - id: ooc-001
+    cohort: out_of_corpus
+    domain: sec_financial
+    question: "What is the CEO's personal home address?"
+    expected: "The documents do not support an answer."
+    answerable: false
+
+  - id: research-001
+    cohort: answerable
+    domain: research_papers
+    question: "Which dataset is the proposed method evaluated on?"
+    expected: "ImageNet"
+    answerable: true
+    source: { document: "demo-paper.pdf", page: 6, quote: "we evaluate on ImageNet" }
+
+  - id: detect-001
+    cohort: domain_detection
+    domain: sec_financial
+    question: "(domain detection) classify this document"
+    expected: "sec_financial"
+    answerable: true
+    source: { document: "demo-10k.pdf" }

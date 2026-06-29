@@ -8,6 +8,9 @@ dependencies = [
     "provenance-service",
     "asyncpg>=0.29",
     "pdfplumber>=0.11",  # digital-first PDF parsing (MIT/pdfminer.six) — R61
+    "faiss-cpu>=1.8",    # VectorStorePort adapter (MIT) — R21
+    "kuzu>=0.4",         # embedded knowledge graph (MIT) — R22
+    "fastembed>=0.3",    # local ONNX embeddings (Apache-2.0) — R66
 ]
 
 [build-system]

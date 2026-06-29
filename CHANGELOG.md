@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **P1 ingestion (in progress)** — real logic filling the saga:
+  - Parse service: digital-first PDF parsing (pdfplumber) → typed elements with
+    page+bbox+reading-order, tables kept coherent, parse-method provenance (R60–R64).
+  - Structure-aware chunker (R68); heuristic domain detection + detect-but-confirm (R8/R9/R10/R55);
+    schema-driven extraction with repair-by-dropping (R16/R17).
+  - v1 entity resolver — normalized match + stable ids → cross-document merge (R18/R19).
+  - Kuzu graph store (typed nodes/edges, kb_id, provenance) and FAISS VectorStorePort
+    adapter + fastembed embeddings (R20–R22, R56, R66).
+  - Saga orchestrator with reverse-order compensation (R54); golden-set seed + loader (R40).
+  - 39 unit tests (real FAISS + Kuzu engines); CI runs the full suite + R59 license audit.
 - **P0 walking skeleton** — 8 microservices (gateway, ingestion, parse, extraction,
   vector, graph, model, query_agent) running under `docker compose` with NATS + Postgres
   + an OpenTelemetry collector. Verified: one distributed trace spans the ingestion saga

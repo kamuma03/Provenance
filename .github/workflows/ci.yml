@@ -19,17 +19,17 @@ jobs:
       - name: Install workspace
         run: |
           uv venv
-          uv pip install -e packages/contracts -e packages/service -e services
-          uv pip install ruff mypy pytest pytest-asyncio
+          uv pip install -e packages/contracts -e packages/service -e services -e eval
+          uv pip install ruff mypy pytest pytest-asyncio reportlab
 
       - name: Lint (ruff)
-        run: uv run ruff check packages services scripts
+        run: uv run ruff check packages services eval scripts
 
       - name: Type-check (mypy)
         run: uv run mypy packages/contracts/src packages/service/src
 
-      - name: Unit tests (contracts)
-        run: uv run pytest packages -q
+      - name: Unit tests
+        run: uv run pytest packages services eval -q
 
       - name: License audit (R59 — fail on non-permissive deps)
         run: uv run python scripts/license_audit.py
