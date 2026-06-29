@@ -45,6 +45,8 @@ class CrossEncoderReranker:
 
 
 def get_reranker() -> Reranker:
+    if os.environ.get("PROVENANCE_OFFLINE"):
+        return LexicalReranker()
     model_name = os.environ.get("RERANKER_MODEL", "Xenova/ms-marco-MiniLM-L-6-v2")
     try:
         return CrossEncoderReranker(model_name)

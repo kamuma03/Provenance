@@ -10,6 +10,9 @@ x-service-base: &service-base
     NATS_URL: nats://nats:4222
     OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
     OTEL_SERVICE_NAMESPACE: provenance
+    # Sandbox/compose: deterministic embedder + lexical reranker (no model downloads).
+    # Unset on the DGX Spark to use the real fastembed models.
+    PROVENANCE_OFFLINE: "1"
   depends_on:
     - nats
     - otel-collector

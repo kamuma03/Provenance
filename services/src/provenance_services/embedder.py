@@ -60,7 +60,9 @@ class FastEmbedEmbedder:
 
 
 def get_embedder() -> Embedder:
-    """Real fastembed model if available; otherwise the deterministic fallback."""
+    """Real fastembed model unless PROVENANCE_OFFLINE is set; else deterministic fallback."""
+    if os.environ.get("PROVENANCE_OFFLINE"):
+        return DeterministicEmbedder()
     model_name = os.environ.get("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
     try:
         return FastEmbedEmbedder(model_name)

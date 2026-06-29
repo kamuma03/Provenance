@@ -8,10 +8,11 @@ currently returns the retrieved evidence with a placeholder synthesis.
 from __future__ import annotations
 
 from fastapi import Request
-from provenance_contracts import Answer, QueryHit
+from provenance_contracts import EvidenceSet, QueryHit
 from provenance_service import create_app, tracer
 
 from .clients import call
+from .crew import run_crew
 from .retrieval import RetrievalDeps, retrieve
 
 app = create_app("query-agent")
@@ -70,14 +71,16 @@ async def retrieve_endpoint(req: Request) -> dict[str, object]:
 
 @app.post("/answer", tags=["query"])
 async def answer(req: Request) -> dict[str, object]:
-    """P2: return retrieved evidence + placeholder synthesis (the crew lands in P3)."""
+    """Run the agentic crew: plan → retrieve → (synthesize → critique)* → cited Answer (R29–R33)."""
     body = await req.json()
     kb_id = body.get("kb_id", "default")
     query = body.get("query", "")
-    with tracer("query-agent").start_as_current_span("query.answer"):
-        evidence = await retrieve(kb_id, query, _deps())
-        ans = Answer(
-            text="(P2 retrieval core — synthesis + Critic land in P3)",
-            refused=not evidence.chunks,
-        )
-        return {"query": query, "evidence": evidence.model_dump(), "answer": ans.model_dump()}
+
+    async def _retrieve(kb: str, subquery: str) -> EvidenceSet:
+        return await retrieve(kb, subquery, _deps())
+
+    with tracer("query-agent").start_as_current_span("query.answer") as span:
+        ans = await run_crew(query, kb_id, _retrieve)
+        span.set_attribute("answer.refused", ans.refused)
+        span.set_attribute("answer.claims", len(ans.claims))
+        return {"query": query, "answer": ans.model_dump()}
