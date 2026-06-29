@@ -8,11 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- **OCR fallback implemented** (R60–R63) — image-only/scanned PDFs are now read via
-  **RapidOCR** (ONNX PaddleOCR, CPU, Apache-2.0, models bundled) with pages rendered by
-  pypdfium2; OCR elements carry real page+bbox so citation highlight works on scans.
-  Previously only the digital-first (text-layer) path was wired. Verified end-to-end on a
-  genuinely image-only PDF. (Docling remains the richer Spark option.)
+- **Docling default parse engine** (R60–R62) — `PARSE_ENGINE=docling` (now the default)
+  runs the Docling document-understanding pipeline (layout + TableFormer + reading order)
+  with **PaddleOCR (RapidOCR ONNX)** as the OCR backend, mapped onto the ParseResult
+  contract (typed elements, page+bbox, reading order). Verified against the real pipeline.
+  The lightweight `PARSE_ENGINE=pdfplumber` backend (digital-first + RapidOCR fallback)
+  remains available for air-gap-fast / minimal-footprint deployments.
+- **OCR fallback** (R60–R63) — image-only/scanned PDFs read via **RapidOCR** (ONNX
+  PaddleOCR, Apache-2.0, models bundled), pages rendered by pypdfium2; OCR elements carry
+  real page+bbox so citation highlight works on scans.
+- **License audit hardened** — judges by SPDX classifier + license name, not the full
+  license body (fixes a BSD/permissive false positive).
 - **P6 (multi-vendor, minus AWS)** — Qdrant (dedicated-server) and pgvector (in-database)
   adapters behind the `VectorStorePort`, plus OpenSearch/Weaviate stubs; a config-driven
   factory selects the backend via `VECTOR_BACKEND` (R20/R21/N4). Benchmark harness +

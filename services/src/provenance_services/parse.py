@@ -1,20 +1,31 @@
 """Parse service — layout-aware OCR / table extraction (R60–R64).
 
-Digital-first parsing via pdfplumber (born-digital PDFs); OCR fallback via RapidOCR
-(ONNX PaddleOCR, CPU) for image-only pages. Returns typed elements with page + bbox +
-reading order, and records the parse method as provenance (R63).
+Backend selected by PARSE_ENGINE (R60):
+  * `docling` (default) — Docling document-understanding pipeline (layout + TableFormer +
+    reading order) with PaddleOCR (RapidOCR ONNX) for raster pages.
+  * `pdfplumber` — lightweight digital-first (pdfplumber) + RapidOCR fallback; air-gap-fast.
+Both return typed elements with page + bbox + reading order and record provenance (R63).
 """
 
 from __future__ import annotations
 
 import base64
+import os
 
 from fastapi import Request
+from provenance_contracts import ParseResult
 from provenance_service import create_app, tracer
 
-from .parse_engine import parse_pdf_bytes
-
 app = create_app("parse")
+
+
+def parse_document(content: bytes) -> ParseResult:
+    engine = os.environ.get("PARSE_ENGINE", "docling").lower()
+    if engine.startswith("docling"):
+        from .docling_parser import parse_pdf_bytes_docling
+        return parse_pdf_bytes_docling(content)
+    from .parse_engine import parse_pdf_bytes
+    return parse_pdf_bytes(content)
 
 
 @app.post("/parse", tags=["parse"])
@@ -26,7 +37,7 @@ async def parse(req: Request) -> dict[str, object]:
         if not content_b64:
             # No payload (e.g. P0-style ping): return an empty, well-formed result.
             return {"elements": [], "pages": 0, "parse_method": "text_layer", "engine": "none"}
-        result = parse_pdf_bytes(base64.b64decode(content_b64))
+        result = parse_document(base64.b64decode(content_b64))
         span.set_attribute("parse.elements", len(result.elements))
-        span.set_attribute("parse.method", result.parse_method.value)
+        span.set_attribute("parse.engine", result.engine)
         return result.model_dump()

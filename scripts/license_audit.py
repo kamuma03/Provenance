@@ -21,10 +21,16 @@ ALLOWLIST: set[str] = set()
 
 
 def _license_text(dist) -> str:  # type: ignore[no-untyped-def]
+    """License signal: SPDX classifiers + the License field's first line (the name).
+
+    Deliberately ignores the full License *body* — matching DENY substrings inside a
+    license's text causes false positives (e.g. a permissive BSD body mentioning terms).
+    """
     meta = dist.metadata
-    parts = [meta.get("License", "") or ""]
-    parts += [v for k, v in meta.items() if k == "Classifier" and "License" in v]
-    return " ".join(parts).lower()
+    classifiers = [v for k, v in meta.items() if k == "Classifier" and v.startswith("License")]
+    license_field = (meta.get("License", "") or "").strip()
+    name_line = license_field.splitlines()[0] if license_field else ""
+    return " ".join([*classifiers, name_line]).lower()
 
 
 def main() -> int:
