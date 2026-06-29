@@ -5,8 +5,11 @@ Owns the domain registry. P0: no-op shell returning the generic fallback.
 
 from __future__ import annotations
 
-from provenance_contracts import GENERIC_FALLBACK_ID, REGISTRY
+from fastapi import Request
+from provenance_contracts import REGISTRY
 from provenance_service import create_app, tracer
+
+from .detection import detect, should_pause_for_confirmation
 
 app = create_app("extraction")
 
@@ -18,10 +21,15 @@ async def domains() -> dict[str, list[str]]:
 
 
 @app.post("/detect", tags=["extraction"])
-async def detect() -> dict[str, object]:
-    with tracer("extraction").start_as_current_span("extraction.detect"):
-        # P0: real classifier (confidence + rationale) lands in P1.
-        return {"domain": GENERIC_FALLBACK_ID, "confidence": 0.0, "rationale": "P0 no-op"}
+async def detect_domain(req: Request) -> dict[str, object]:
+    """Detect the document domain from a text sample (R8) + flag confirm need (R9)."""
+    body = await req.json()
+    text = body.get("text", "")
+    with tracer("extraction").start_as_current_span("extraction.detect") as span:
+        d = detect(text)
+        span.set_attribute("detect.domain", d.domain)
+        span.set_attribute("detect.confidence", d.confidence)
+        return {**d.model_dump(), "needs_confirmation": should_pause_for_confirmation(d)}
 
 
 @app.post("/extract", tags=["extraction"])
