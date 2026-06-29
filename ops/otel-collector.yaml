@@ -1,0 +1,21 @@
+# OpenTelemetry Collector — receives OTLP traces from every service and prints them,
+# so we can verify that one trace spans all hops (P0 gate, R56).
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  batch: {}
+
+exporters:
+  debug:
+    verbosity: detailed
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]

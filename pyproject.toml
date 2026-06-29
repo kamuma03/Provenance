@@ -1,0 +1,41 @@
+[project]
+name = "provenance"
+version = "0.1.0"
+description = "Provenance-aware RAG + Knowledge Graph system (monorepo root)"
+requires-python = ">=3.11"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+
+[tool.uv.workspace]
+members = ["packages/*", "services"]
+
+[tool.uv.sources]
+provenance-contracts = { workspace = true }
+provenance-service = { workspace = true }
+
+# Dev tooling shared across the workspace.
+[dependency-groups]
+dev = [
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["packages", "services"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["packages", "services"]

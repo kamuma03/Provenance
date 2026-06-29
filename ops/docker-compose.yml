@@ -1,0 +1,95 @@
+# Provenance — P0 walking skeleton.
+# 8 services + NATS + Postgres + OpenTelemetry collector. `docker compose up`.
+name: provenance
+
+x-service-base: &service-base
+  build:
+    context: ..
+    dockerfile: Dockerfile
+  environment: &service-env
+    NATS_URL: nats://nats:4222
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+    OTEL_SERVICE_NAMESPACE: provenance
+  depends_on:
+    - nats
+    - otel-collector
+  restart: unless-stopped
+
+services:
+  # ---- infrastructure ----
+  nats:
+    image: nats:2.10
+    command: ["-js"]
+    ports: ["4222:4222"]
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: provenance
+      POSTGRES_PASSWORD: change-me
+      POSTGRES_DB: provenance
+    volumes:
+      - ./sql/catalog_init.sql:/docker-entrypoint-initdb.d/catalog_init.sql:ro
+    ports: ["5432:5432"]
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.111.0
+    command: ["--config=/etc/otel-collector.yaml"]
+    volumes:
+      - ./otel-collector.yaml:/etc/otel-collector.yaml:ro
+
+  # ---- application services (8) ----
+  gateway:
+    <<: *service-base
+    command: ["uvicorn", "provenance_services.gateway:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      <<: *service-env
+      service_name: gateway
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: provenance
+      POSTGRES_PASSWORD: change-me
+      POSTGRES_DB: provenance
+      QUERY_URL: http://query-agent:8000
+    ports: ["8000:8000"]
+    depends_on:
+      - nats
+      - postgres
+      - otel-collector
+      - query-agent
+
+  ingestion:
+    <<: *service-base
+    command: ["uvicorn", "provenance_services.ingestion:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      <<: *service-env
+      service_name: ingestion
+
+  parse:
+    <<: *service-base
+    command: ["uvicorn", "provenance_services.parse:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment: { <<: *service-env, service_name: parse }
+
+  extraction:
+    <<: *service-base
+    command: ["uvicorn", "provenance_services.extraction:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment: { <<: *service-env, service_name: extraction }
+
+  vector:
+    <<: *service-base
+    command: ["uvicorn", "provenance_services.vector:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment: { <<: *service-env, service_name: vector }
+
+  graph:
+    <<: *service-base
+    command: ["uvicorn", "provenance_services.graph:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment: { <<: *service-env, service_name: graph }
+
+  model:
+    <<: *service-base
+    command: ["uvicorn", "provenance_services.model:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment: { <<: *service-env, service_name: model }
+
+  query-agent:
+    <<: *service-base
+    command: ["uvicorn", "provenance_services.query_agent:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment: { <<: *service-env, service_name: query-agent }

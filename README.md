@@ -9,9 +9,10 @@ Upload documents into named knowledge bases; Provenance auto-detects the domain,
 ![Node](https://img.shields.io/badge/Node-20+-green.svg)
 ![Status](https://img.shields.io/badge/status-pre--alpha%20(planning%20complete)-orange.svg)
 
-> **Status:** Greenfield. The complete requirements & architecture specification is finished
-> ([`docs/plans/provenance-requirements.md`](docs/plans/provenance-requirements.md)); implementation
-> begins with the **P0 walking skeleton**. Commands below marked _(P0)_ are not wired yet.
+> **Status:** P0 **walking skeleton implemented & verified** — all 8 services run under
+> `docker compose`, with one distributed trace spanning the ingestion saga (7 services, across
+> the async NATS boundary) and the query fan-out (5 services). No feature logic yet; that begins
+> in P1. Full spec: [`docs/plans/provenance-requirements.md`](docs/plans/provenance-requirements.md).
 
 ---
 
@@ -54,27 +55,46 @@ Next.js UI ──SSE──► Gateway/BFF ──┬─ async (NATS) ─► Inges
 
 Every datastore is permissively licensed (Apache 2.0 / MIT / BSD / PostgreSQL) — a CI license-audit fails the build on any SSPL/BSL/GPL component, keeping the on-prem claim legal-clean.
 
-## Getting started _(P0)_
+## Getting started
 
 ```bash
-# Prerequisites: Docker + Docker Compose, a configured LLM endpoint
-cp .env.example .env          # then edit credentials/endpoints
-docker compose up             # brings up all 8 services + NATS + Postgres   (P0)
+# Prerequisites: Docker + Docker Compose. (An LLM endpoint is only needed from P1.)
+cd ops
+docker compose up -d          # builds + starts all 8 services + NATS + Postgres + OTel collector
+
+# Exercise the skeleton:
+curl localhost:8000/health
+KB=$(curl -s -XPOST localhost:8000/kb -d '{"name":"Demo","domain_id":"sec_financial"}'); echo $KB
+curl -XPOST localhost:8000/kb/<kb_id>/documents -d '{"source":"demo.pdf","content":"hi"}'   # 202 queued → saga
+curl -XPOST localhost:8000/query -d '{"query":"risk factors?"}'                              # fan-out → answer
+
+docker compose logs otel-collector   # see the trace spanning services
 ```
 
-The first milestone (P0) is a *walking skeleton*: all services as thin shells wired through the queue and catalog, emitting one end-to-end trace, before any feature logic.
+Run the local checks (what CI runs):
+
+```bash
+uv pip install -e packages/contracts -e packages/service -e services
+uv run pytest packages -q            # contract validation
+uv run python scripts/license_audit.py   # R59: fail on non-permissive deps
+```
 
 ## Repository structure
 
 ```
+packages/
+  contracts/   # shared domain model, ports, agent messages, domain registry (Pydantic, v1)
+  service/     # shared framework: FastAPI base, OpenTelemetry, health/readiness, NATS bus
+services/      # the 8 microservices (gateway, ingestion, parse, extraction, vector, graph, model, query_agent)
+ops/           # docker-compose.yml, otel-collector.yaml, sql/catalog_init.sql
+scripts/       # license_audit.py (R59)
+tests/e2e/     # walking-skeleton end-to-end smoke test
 docs/
   plans/provenance-requirements.md   # the authoritative spec (R1–R71, N1–N9)
   adr/                               # architecture decision records
-ARCHITECTURE.md                      # service map & design overview
-CONTRIBUTING.md  SECURITY.md  CHANGELOG.md  CLAUDE.md
 ```
 
-Service code (`services/`), the Next.js app (`web/`), and the eval harness (`eval/`) land during P0–P5.
+The Next.js app (`web/`) and the eval harness (`eval/`) land during P1–P5.
 
 ## Documentation
 
