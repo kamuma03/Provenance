@@ -8,8 +8,9 @@ extraction uses an injectable LLM extractor (the Spark path), validated the same
 
 from __future__ import annotations
 
+import json
 import re
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 from provenance_contracts import (
     GENERIC_FALLBACK_ID,
@@ -18,11 +19,12 @@ from provenance_contracts import (
     ExtractionResult,
     RelationCandidate,
 )
+from provenance_service import LLMClient
 
 SCHEMA_VERSION = "v1"
 
-# Returns raw dicts: {"entities": [{"type","canonical_name"}], "relations": [...]}.
-LLMExtractor = Callable[[str, DomainSpec], dict]
+# Async; returns raw {"entities": [{"type","canonical_name"}], "relations": [...]}.
+LLMExtractor = Callable[[str, DomainSpec], Awaitable[dict]]
 
 _PROPER = re.compile(r"\b([A-Z][a-zA-Z0-9.&]+(?:\s+[A-Z][a-zA-Z0-9.&]+)*)\b")
 _ORG_SUFFIX = ("Inc", "Inc.", "Corp", "Corp.", "Ltd", "LLC", "PLC", "Co", "Co.")
@@ -58,10 +60,12 @@ def validate_against_schema(
     return kept, kept_rels
 
 
-def extract(text: str, spec: DomainSpec, llm: LLMExtractor | None = None) -> ExtractionResult:
+async def extract(
+    text: str, spec: DomainSpec, llm: LLMExtractor | None = None
+) -> ExtractionResult:
     """Extract typed entities/relations, validated against the domain schema."""
     if llm is not None:
-        raw = llm(text, spec)
+        raw = await llm(text, spec)
         entities = [EntityCandidate(**e) for e in raw.get("entities", [])]
         relations = [RelationCandidate(**r) for r in raw.get("relations", [])]
     elif spec.id == GENERIC_FALLBACK_ID:
@@ -77,3 +81,23 @@ def extract(text: str, spec: DomainSpec, llm: LLMExtractor | None = None) -> Ext
         entities=entities,
         relations=relations,
     )
+
+
+def make_llm_extractor(client: LLMClient) -> LLMExtractor:
+    """Bridge an LLMClient to the LLMExtractor interface (typed-domain extraction, R16)."""
+
+    async def _extract(text: str, spec: DomainSpec) -> dict:
+        system = (
+            f"Extract entities and relations for the '{spec.name}' domain. "
+            f"Allowed entity types: {spec.entity_types}. "
+            f"Allowed relation predicates: {spec.relation_types}. "
+            'Reply with JSON only: {"entities": [{"type": "...", "canonical_name": "..."}], '
+            '"relations": [{"subject": "...", "predicate": "...", "object": "..."}]}.'
+        )
+        raw = await client.complete(system, text)
+        try:
+            return json.loads(raw[raw.index("{"): raw.rindex("}") + 1])
+        except Exception:
+            return {"entities": [], "relations": []}
+
+    return _extract

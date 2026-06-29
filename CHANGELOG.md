@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Multi-provider LLM routing** (A2) — `LLMClient` gains an `OpenAICompatLLMClient`
+  (covers vLLM / Ollama / SGLang via one OpenAI-compatible base URL) alongside the
+  Anthropic (Claude) client, plus a per-task router `get_llm(task)` configured by
+  `LLM_<TASK>` env. Recommended defaults: extraction → local (the token sink, on the
+  Spark), planner/synthesizer → Sonnet, critic/eval-judge → Opus. The crew
+  (Planner/Critic/Synthesizer) and the extraction engine are wired to the router with
+  LLM paths and **heuristic fallback** — unset/no-key/no-endpoint ⇒ offline heuristic, so
+  the eval gate and all tests still pass without any LLM. `anthropic` SDK added (MIT).
 - **Docling default parse engine** (R60–R62) — `PARSE_ENGINE=docling` (now the default)
   runs the Docling document-understanding pipeline (layout + TableFormer + reading order)
   with **PaddleOCR (RapidOCR ONNX)** as the OCR backend, mapped onto the ParseResult

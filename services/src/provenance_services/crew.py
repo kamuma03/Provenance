@@ -1,7 +1,8 @@
 """Agentic crew (R29–R33, R65) — Planner → Retriever → Critic → Synthesizer.
 
-Offline-runnable heuristic implementations with an optional LLMClient for the richer
-Claude path (the Retriever is the P2 retrieval core). The orchestration enforces:
+Each agent takes an optional LLMClient (resolved per task by the router, A2). With none it
+runs deterministic heuristics (offline-safe); with one it uses the LLM. The orchestration
+enforces:
   - claim-level groundedness with **strict whole-answer refusal** (R31/R32/R65)
   - a hard MAX_ITERATIONS bound (R32)
   - the comparative set-difference compare-op (R33)
@@ -10,6 +11,7 @@ Claude path (the Retriever is the P2 retrieval core). The orchestration enforces
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from collections.abc import Awaitable, Callable
@@ -26,6 +28,7 @@ from provenance_contracts import (
     SubqueryType,
     Verdict,
 )
+from provenance_service import LLMClient, get_llm
 
 MAX_ITERATIONS = int(os.environ.get("MAX_ITERATIONS", "3"))  # hard loop bound (R32)
 GROUNDING_THRESHOLD = 0.6  # fraction of claim tokens that must appear in some evidence chunk
@@ -50,7 +53,17 @@ def _tokens(text: str) -> set[str]:
 class Planner:
     """Query → Plan: decompose, scope KB, type each subquery (R29)."""
 
-    def plan(self, query: str, kb_scope: list[str]) -> Plan:
+    def __init__(self, llm: LLMClient | None = None) -> None:
+        self._llm = llm
+
+    async def plan(self, query: str, kb_scope: list[str]) -> Plan:
+        if self._llm is not None:
+            llm_plan = await self._llm_plan(query, kb_scope)
+            if llm_plan is not None:
+                return llm_plan
+        return self._heuristic_plan(query, kb_scope)
+
+    def _heuristic_plan(self, query: str, kb_scope: list[str]) -> Plan:
         ql = query.lower()
         if any(m in ql for m in _COMPARATIVE):
             split = re.split(r"but not|compared to|versus|\bvs\b", ql)
@@ -64,12 +77,36 @@ class Planner:
         return Plan(kb_scope=kb_scope, subqueries=[Subquery(text=query, type=qtype)],
                     synthesis_strategy="direct")
 
+    async def _llm_plan(self, query: str, kb_scope: list[str]) -> Plan | None:
+        system = (
+            "Decompose the user's question into 1-2 search subqueries. Classify each as "
+            "factual | relational | comparative. Reply with JSON only: "
+            '{"subqueries": [{"text": "...", "type": "..."}], '
+            '"synthesis_strategy": "direct|set_difference"}.'
+        )
+        try:
+            raw = await self._llm.complete(system, query)  # type: ignore[union-attr]
+            data = json.loads(raw[raw.index("{"): raw.rindex("}") + 1])
+            subs = [
+                Subquery(text=s["text"], type=SubqueryType(s["type"]))
+                for s in data["subqueries"]
+            ][:2]
+            if not subs:
+                return None
+            return Plan(kb_scope=kb_scope, subqueries=subs,
+                        synthesis_strategy=data.get("synthesis_strategy", "direct"))
+        except Exception:
+            return None  # malformed → heuristic fallback
+
 
 # ----------------------------------------------------------------------- Synthesizer
 class Synthesizer:
     """Compose a cited Answer from evidence; execute the compare-op for comparative (R33)."""
 
-    def synthesize(
+    def __init__(self, llm: LLMClient | None = None) -> None:
+        self._llm = llm
+
+    async def synthesize(
         self, plan: Plan, evidences: list[EvidenceSet], prev: Verdict | None = None
     ) -> Answer:
         chunks = self._select_chunks(plan, evidences)
@@ -79,18 +116,32 @@ class Synthesizer:
                 refused=True,
                 refusal_reason="not supported by the corpus",
             )
+        # Claims (with citations) are always chunk-derived — the grounding anchor (R65).
         claims = [
-            Claim(
-                text=c.text,
-                citations=[Citation(chunk_id=c.chunk_id, page=c.page, bbox=c.bbox)],
-            )
+            Claim(text=c.text, citations=[Citation(chunk_id=c.chunk_id, page=c.page, bbox=c.bbox)])
             for c in chunks
         ]
-        return Answer(text=" ".join(c.text for c in claims), claims=claims)
+        text = " ".join(c.text for c in claims)
+        if self._llm is not None:
+            text = await self._llm_text(plan, chunks) or text
+        return Answer(text=text, claims=claims)
+
+    async def _llm_text(self, plan: Plan, chunks: list[ScoredChunk]) -> str | None:
+        system = (
+            "Answer the question using ONLY the evidence provided. Be concise. Do not add "
+            "facts that are not in the evidence."
+        )
+        question = " ".join(sq.text for sq in plan.subqueries)
+        evidence = "\n".join(f"- {c.text}" for c in chunks)
+        try:
+            return await self._llm.complete(  # type: ignore[union-attr]
+                system, f"Question: {question}\n\nEvidence:\n{evidence}"
+            )
+        except Exception:
+            return None  # fall back to the extractive text
 
     def _select_chunks(self, plan: Plan, evidences: list[EvidenceSet]) -> list[ScoredChunk]:
         if plan.synthesis_strategy == "set_difference" and len(evidences) >= 2:
-            # Comparative: chunks in the first set but NOT the second (R33).
             exclude = {c.chunk_id for c in evidences[1].chunks}
             candidates = [c for c in evidences[0].chunks if c.chunk_id not in exclude]
         else:
@@ -114,14 +165,23 @@ class Synthesizer:
 class Critic:
     """Verify groundedness claim-by-claim; strict whole-answer refusal (R31/R65)."""
 
-    def verify(self, answer: Answer, evidences: list[EvidenceSet]) -> Verdict:
+    def __init__(self, llm: LLMClient | None = None) -> None:
+        self._llm = llm
+
+    async def verify(self, answer: Answer, evidences: list[EvidenceSet]) -> Verdict:
         # An honest refusal grounded in an *absence* of evidence is correct (R31).
         if answer.refused:
             return Verdict(status=CriticStatus.OK)
+        evidence_text = "\n".join(c.text for ev in evidences for c in ev.chunks)
         chunk_tokens = [_tokens(c.text) for ev in evidences for c in ev.chunks]
         ungrounded: list[str] = []
         for claim in answer.claims:
-            if not self._grounded(claim.text, chunk_tokens):
+            grounded = (
+                await self._llm_grounded(claim.text, evidence_text)
+                if self._llm is not None
+                else self._grounded(claim.text, chunk_tokens)
+            )
+            if not grounded:
                 ungrounded.append(claim.text)
         if ungrounded:
             return Verdict(status=CriticStatus.REVISE, ungrounded_claims=ungrounded)
@@ -132,6 +192,19 @@ class Critic:
         if not ct:
             return False
         return any(len(ct & toks) / len(ct) >= GROUNDING_THRESHOLD for toks in chunk_tokens)
+
+    async def _llm_grounded(self, claim: str, evidence: str) -> bool:
+        system = (
+            "You verify whether a claim is fully supported by the evidence. "
+            "Reply with exactly YES or NO."
+        )
+        try:
+            out = await self._llm.complete(  # type: ignore[union-attr]
+                system, f"Evidence:\n{evidence}\n\nClaim: {claim}"
+            )
+            return out.strip().upper().startswith("YES")
+        except Exception:
+            return self._grounded(claim, [_tokens(evidence)])  # degrade to heuristic
 
 
 # ------------------------------------------------------------------------ orchestration
@@ -145,20 +218,23 @@ async def run_crew(
     critic: Critic | None = None,
     max_iterations: int = MAX_ITERATIONS,
 ) -> Answer:
-    """Plan → retrieve → (synthesize → critique)* with a hard iteration bound (R32)."""
-    planner = planner or Planner()
-    synthesizer = synthesizer or Synthesizer()
-    critic = critic or Critic()
+    """Plan → retrieve → (synthesize → critique)* with a hard iteration bound (R32).
 
-    plan = planner.plan(query, [kb_id])
+    Each agent is resolved from the per-task LLM router unless explicitly injected (A2).
+    """
+    planner = planner or Planner(get_llm("planner"))
+    synthesizer = synthesizer or Synthesizer(get_llm("synthesizer"))
+    critic = critic or Critic(get_llm("critic"))
+
+    plan = await planner.plan(query, [kb_id])
     evidences = [await retrieve_fn(kb_id, sq.text) for sq in plan.subqueries]
 
     verdict: Verdict | None = None
     for _ in range(max_iterations):
-        answer = synthesizer.synthesize(plan, evidences, verdict)
+        answer = await synthesizer.synthesize(plan, evidences, verdict)
         if answer.refused:
             return answer  # honest refusal (absence) — Critic confirms this is OK
-        verdict = critic.verify(answer, evidences)
+        verdict = await critic.verify(answer, evidences)
         if verdict.status is CriticStatus.OK:
             for claim in answer.claims:
                 claim.grounded = True

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from provenance_contracts import REGISTRY, DomainSpec, DomainTier
 from provenance_services.extraction_engine import (
     extract,
@@ -18,9 +19,10 @@ def test_heuristic_generic_extracts_proper_nouns() -> None:
     assert any(e.type == "Organization" for e in ents)  # Inc suffix => Organization
 
 
-def test_generic_domain_extraction_runs_without_llm() -> None:
+@pytest.mark.asyncio
+async def test_generic_domain_extraction_runs_without_llm() -> None:
     spec = REGISTRY["generic"]
-    result = extract("Tesla Inc. and the World Bank met in Geneva.", spec)
+    result = await extract("Tesla Inc. and the World Bank met in Geneva.", spec)
     assert result.domain_id == "generic"
     assert result.schema_version == "v1"
     assert result.entities  # heuristic produced something
@@ -45,10 +47,11 @@ def test_validation_drops_off_schema_types_and_relations() -> None:
     assert len(kept_r) == 1 and kept_r[0].predicate == "AUDITED_BY"
 
 
-def test_typed_domain_uses_injected_llm_and_validates() -> None:
+@pytest.mark.asyncio
+async def test_typed_domain_uses_injected_llm_and_validates() -> None:
     spec = REGISTRY["sec_financial"]
 
-    def fake_llm(text: str, spec: DomainSpec) -> dict:
+    async def fake_llm(text: str, spec: DomainSpec) -> dict:
         return {
             "entities": [
                 {"type": "Company", "canonical_name": "Apple Inc."},
@@ -57,8 +60,20 @@ def test_typed_domain_uses_injected_llm_and_validates() -> None:
             "relations": [],
         }
 
-    result = extract("...", spec, llm=fake_llm)
+    result = await extract("...", spec, llm=fake_llm)
     assert [e.canonical_name for e in result.entities] == ["Apple Inc."]  # off-schema dropped
+
+
+@pytest.mark.asyncio
+async def test_make_llm_extractor_parses_json_and_drops_off_schema() -> None:
+    from provenance_service import MockLLMClient
+    from provenance_services.extraction_engine import make_llm_extractor
+
+    spec = REGISTRY["sec_financial"]
+    raw = '{"entities": [{"type": "Company", "canonical_name": "Apple Inc."}], "relations": []}'
+    extractor = make_llm_extractor(MockLLMClient([raw]))
+    result = await extract("Apple Inc. filed a 10-K.", spec, llm=extractor)
+    assert [e.canonical_name for e in result.entities] == ["Apple Inc."]
 
 
 def test_registry_tiers_intact() -> None:
