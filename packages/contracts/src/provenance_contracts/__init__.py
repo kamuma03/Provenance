@@ -15,6 +15,7 @@ from .domain import (
     ProcessingTier,
     Relation,
 )
+from .extraction import EntityCandidate, ExtractionResult, RelationCandidate
 from .messages import (
     Answer,
     Citation,
@@ -46,6 +47,8 @@ __all__ = [
     # messages
     "Answer", "Citation", "Claim", "CriticStatus", "EvidenceSet", "Plan",
     "ScoredChunk", "Subquery", "SubqueryType", "Verdict",
+    # extraction
+    "EntityCandidate", "ExtractionResult", "RelationCandidate",
     # parse
     "ParsedElement", "ParseResult",
     # ports

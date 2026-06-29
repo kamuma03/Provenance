@@ -6,10 +6,11 @@ Owns the domain registry. P0: no-op shell returning the generic fallback.
 from __future__ import annotations
 
 from fastapi import Request
-from provenance_contracts import REGISTRY
+from provenance_contracts import GENERIC_FALLBACK_ID, REGISTRY
 from provenance_service import create_app, tracer
 
 from .detection import detect, should_pause_for_confirmation
+from .extraction_engine import extract as run_extract
 
 app = create_app("extraction")
 
@@ -33,6 +34,13 @@ async def detect_domain(req: Request) -> dict[str, object]:
 
 
 @app.post("/extract", tags=["extraction"])
-async def extract() -> dict[str, object]:
-    with tracer("extraction").start_as_current_span("extraction.extract"):
-        return {"ok": True, "entities": 0, "relations": 0, "note": "P0 skeleton no-op"}
+async def extract_entities(req: Request) -> dict[str, object]:
+    """Schema-driven extraction for the given domain (R16). LLM path = Spark."""
+    body = await req.json()
+    text = body.get("text", "")
+    domain_id = body.get("domain_id", GENERIC_FALLBACK_ID)
+    spec = REGISTRY.get(domain_id, REGISTRY[GENERIC_FALLBACK_ID])
+    with tracer("extraction").start_as_current_span("extraction.extract") as span:
+        result = run_extract(text, spec)  # no LLM in-sandbox → generic heuristic / empty
+        span.set_attribute("extract.entities", len(result.entities))
+        return result.model_dump()
