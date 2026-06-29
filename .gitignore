@@ -1,0 +1,84 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+*.egg
+dist/
+build/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pytype/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# ---- Node.js / TypeScript / Next.js ----
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# ---- Environment & secrets ----
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+*.keystore
+
+# ---- Data stores & artifacts (per-service, never committed) ----
+# Postgres / Catalog
+pgdata/
+*.dump
+# Vector indices
+*.faiss
+faiss_index/
+qdrant_storage/
+# Knowledge graph
+*.kuzu
+kuzu_db/
+# NATS JetStream
+jetstream/
+# Models / weights / OCR assets
+models/
+*.gguf
+*.bin
+*.onnx
+*.safetensors
+*.pt
+*.pth
+
+# ---- Corpora & uploads (large; not source) ----
+data/
+uploads/
+corpora/
+golden_set/*.pdf
+
+# ---- Logs & traces ----
+*.log
+logs/
+traces/
+
+# ---- OS / IDE / misc ----
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.bak
