@@ -12,6 +12,7 @@ members = ["packages/*", "services", "eval"]
 [tool.uv.sources]
 provenance-contracts = { workspace = true }
 provenance-service = { workspace = true }
+provenance-services = { workspace = true }
 
 # Dev tooling shared across the workspace.
 [dependency-groups]

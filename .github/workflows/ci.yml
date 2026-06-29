@@ -33,3 +33,6 @@ jobs:
 
       - name: License audit (R59 — fail on non-permissive deps)
         run: uv run python scripts/license_audit.py
+
+      - name: Eval gate (R44 — fail below §9.2 thresholds; LLM metrics run on the Spark)
+        run: PROVENANCE_OFFLINE=1 uv run python -m provenance_eval.gate

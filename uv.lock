@@ -1522,12 +1522,14 @@ version = "0.1.0"
 source = { editable = "eval" }
 dependencies = [
     { name = "provenance-contracts" },
+    { name = "provenance-services" },
     { name = "pyyaml" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "provenance-contracts", editable = "packages/contracts" },
+    { name = "provenance-services", editable = "services" },
     { name = "pyyaml", specifier = ">=6.0" },
 ]
 

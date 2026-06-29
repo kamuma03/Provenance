@@ -5,6 +5,7 @@ description = "Eval harness: golden set + (P4) RAGAS/hallucination/detection gat
 requires-python = ">=3.11"
 dependencies = [
     "provenance-contracts",
+    "provenance-services",  # the harness runs the real components in-process
     "pyyaml>=6.0",
 ]
 

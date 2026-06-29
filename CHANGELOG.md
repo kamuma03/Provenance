@@ -8,7 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- **P1 ingestion (in progress)** — real logic filling the saga:
+- **P4 eval gate** — in-process harness runs the real pipeline (chunker, FAISS, Kuzu,
+  retrieval core, crew) over a self-contained eval set and gates the build on §9.2
+  thresholds: numeric exact-span (R42), domain-detection accuracy (R43), honest-refusal
+  + over-refusal/answer-rate (R71), retrieval recall, and a groundedness proxy.
+  LLM-judged RAGAS metrics (faithfulness/relevancy/precision/recall) run on the Spark.
+  CI fails below thresholds (R44). 69 unit tests incl. gate pass + regression-fail.
+- **P3 agentic crew** — Planner/Critic/Synthesizer with bounded MAX_ITERATIONS loop,
+  claim-level groundedness, strict whole-answer refusal, comparative set-difference.
+- **P2 retrieval core** — hybrid (FAISS dense + BM25) + cross-encoder rerank + additive
+  graph lift behind query(); vector floor / graph lift; empty-expansion ladder.
+- **P1 ingestion** — real logic filling the saga:
   - Parse service: digital-first PDF parsing (pdfplumber) → typed elements with
     page+bbox+reading-order, tables kept coherent, parse-method provenance (R60–R64).
   - Structure-aware chunker (R68); heuristic domain detection + detect-but-confirm (R8/R9/R10/R55);
