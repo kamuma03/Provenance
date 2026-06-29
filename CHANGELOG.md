@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **P6 (multi-vendor, minus AWS)** — Qdrant (dedicated-server) and pgvector (in-database)
+  adapters behind the `VectorStorePort`, plus OpenSearch/Weaviate stubs; a config-driven
+  factory selects the backend via `VECTOR_BACKEND` (R20/R21/N4). Benchmark harness +
+  `docs/benchmark.md` comparing embedded (FAISS) vs server (Qdrant) vs in-DB (pgvector)
+  on ingest/latency/recall (R23). pgvector verified against a real pgvector container.
+  AWS deployment slice remains deferred (§12.4/12.10).
 - **P5 front-end** — Next.js (TypeScript, app router) two-screen UI: **Ingest** (KB
   create with domain, upload, Quick/Full tier, status polling) and **Chat** (KB scope,
   **SSE streaming** answer, citation panel with page+bbox highlight, live entity graph,

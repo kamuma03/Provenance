@@ -12,6 +12,8 @@ dependencies = [
     "kuzu>=0.4",         # embedded knowledge graph (MIT) — R22
     "fastembed>=0.3",    # local ONNX embeddings + reranker (Apache-2.0) — R66/R24
     "rank-bm25>=0.2",    # sparse retrieval for hybrid (Apache-2.0) — R24
+    "qdrant-client>=1.11",  # dedicated-server vector adapter (Apache-2.0) — R21
+    "pgvector>=0.3",        # in-database vector adapter (PostgreSQL ext) — R21
 ]
 
 [build-system]

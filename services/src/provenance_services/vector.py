@@ -9,10 +9,10 @@ from fastapi import Request
 from provenance_contracts import VectorRecord
 from provenance_service import create_app, tracer
 
-from .faiss_store import FaissVectorStore
+from .vector_factory import get_vector_store
 
 app = create_app("vector")
-_store = FaissVectorStore()
+_store = get_vector_store()  # VECTOR_BACKEND: faiss | qdrant | pgvector (R20/N4)
 
 
 @app.post("/upsert", tags=["vector"])
