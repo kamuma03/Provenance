@@ -82,7 +82,9 @@ services:
   graph:
     <<: *service-base
     command: ["uvicorn", "provenance_services.graph:app", "--host", "0.0.0.0", "--port", "8000"]
-    environment: { <<: *service-env, service_name: graph }
+    environment: { <<: *service-env, service_name: graph, KUZU_DB_PATH: /data/kuzu }
+    volumes:
+      - kuzu_data:/data
 
   model:
     <<: *service-base
@@ -93,3 +95,6 @@ services:
     <<: *service-base
     command: ["uvicorn", "provenance_services.query_agent:app", "--host", "0.0.0.0", "--port", "8000"]
     environment: { <<: *service-env, service_name: query-agent }
+
+volumes:
+  kuzu_data:

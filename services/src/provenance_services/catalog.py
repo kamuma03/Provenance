@@ -65,6 +65,22 @@ class Catalog:
         async with self._pool.acquire() as conn:
             await conn.execute(
                 "INSERT INTO document (id, kb_id, source, content_type, content_hash, status) "
-                "VALUES ($1, $2, $3, $4, $5, 'queued') ON CONFLICT (id) DO NOTHING",
+                "VALUES ($1, $2, $3, $4, $5, 'queued') "
+                "ON CONFLICT (kb_id, content_hash) DO NOTHING",
                 doc_id, kb_id, source, content_type, content_hash,
             )
+
+    async def update_status(self, doc_id: str, status: str) -> None:
+        if self._pool is None:
+            return
+        async with self._pool.acquire() as conn:
+            await conn.execute("UPDATE document SET status = $2 WHERE id = $1", doc_id, status)
+
+    async def get_document(self, doc_id: str) -> dict[str, str] | None:
+        if self._pool is None:
+            return None
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT id, kb_id, source, status FROM document WHERE id = $1", doc_id
+            )
+            return dict(row) if row else None

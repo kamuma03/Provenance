@@ -1,9 +1,10 @@
 """Ingestion service — async saga orchestrator with compensation (R54).
 
-Consumes ingest jobs from NATS and drives the saga across Parse → Extraction → Graph →
-Model → Vector. The trace context rides the NATS headers (R56), so the whole saga is one
-trace. On failure, completed steps are compensated in reverse and the document ends
-`failed` — never half-ingested.
+Consumes ingest jobs from NATS and drives the real saga: Parse → chunk → detect →
+extract → write graph (Kuzu) → embed → upsert vectors (FAISS). The trace context rides
+the NATS headers (R56), so the whole saga is one trace. On failure, completed steps
+compensate in reverse and the document ends `failed`. Status events flow back to the
+Gateway via NATS for catalog updates (B.4).
 """
 
 from __future__ import annotations
@@ -11,8 +12,10 @@ from __future__ import annotations
 import json
 import logging
 
+from provenance_contracts import ParsedElement
 from provenance_service import NatsBus, ServiceSettings, create_app, tracer
 
+from .chunker import chunk_elements
 from .clients import call
 from .saga import Ctx, Saga, SagaStatus, Step
 
@@ -23,50 +26,101 @@ settings = ServiceSettings(service_name="ingestion")  # type: ignore[call-arg]
 bus = NatsBus(settings.nats_url)
 
 INGEST_SUBJECT = "ingest.jobs"
-
-
-def _svc_step(service: str, path: str):  # type: ignore[no-untyped-def]
-    async def run(_ctx: Ctx) -> None:
-        await call(service, path)
-
-    return run
+STATUS_SUBJECT = "ingest.status"
 
 
 def _compensate(service: str):  # type: ignore[no-untyped-def]
     async def comp(ctx: Ctx) -> None:
-        # Best-effort rollback of partial writes (delete-by-document lands with the
-        # stores' delete support; for now we record the intent on the trace).
         log.warning("compensating %s for document_id=%s", service, ctx.get("document_id"))
 
     return comp
 
 
+async def _parse_step(c: Ctx) -> None:
+    resp = await call("parse", "/parse", {"content_b64": c.get("content_b64", "")})
+    c["elements"] = [ParsedElement(**e) for e in resp.get("elements", [])]
+
+
+async def _chunk_step(c: Ctx) -> None:
+    c["chunks"] = chunk_elements(
+        c["elements"], document_id=str(c["document_id"]), kb_id=str(c["kb_id"])
+    )
+
+
+async def _detect_step(c: Ctx) -> None:
+    sample = "\n".join(ch.text for ch in c["chunks"])[:2000]
+    c["sample"] = sample
+    resp = await call("extraction", "/detect", {"text": sample})
+    c["domain"] = resp.get("domain", "generic")
+
+
+async def _extract_step(c: Ctx) -> None:
+    payload = {"text": c.get("sample", ""), "domain_id": c["domain"]}
+    resp = await call("extraction", "/extract", payload)
+    c["entities"] = resp.get("entities", [])
+    c["relations"] = resp.get("relations", [])
+
+
+async def _graph_step(c: Ctx) -> None:
+    await call("graph", "/write", {
+        "kb_id": c["kb_id"], "document_id": c["document_id"],
+        "entities": c["entities"], "relations": c["relations"], "trace_id": c.get("trace_id"),
+    })
+
+
+async def _embed_step(c: Ctx) -> None:
+    texts = [ch.text for ch in c["chunks"]]
+    resp = await call("model", "/embed", {"texts": texts})
+    c["embeddings"] = resp.get("embeddings", [])
+
+
+async def _vector_step(c: Ctx) -> None:
+    records = [
+        {"chunk_id": ch.id, "embedding": emb,
+         "metadata": {"document_id": str(c["document_id"]), "page": str(ch.page)}}
+        for ch, emb in zip(c["chunks"], c["embeddings"], strict=False)
+    ]
+    if records:
+        await call("vector", "/upsert", {"namespace": c["kb_id"], "records": records})
+
+
 def _build_saga() -> Saga:
     return Saga([
-        Step("parse", _svc_step("parse", "/parse")),
-        Step("detect", _svc_step("extraction", "/detect")),
-        # detect-but-confirm pause (R9/R55) wires in once the confirm callback exists.
-        Step("extract", _svc_step("extraction", "/extract")),
-        Step("write_graph", _svc_step("graph", "/write"), compensate=_compensate("graph")),
-        Step("embed", _svc_step("model", "/embed")),
-        Step("upsert", _svc_step("vector", "/upsert"), compensate=_compensate("vector")),
+        Step("parse", _parse_step),
+        Step("chunk", _chunk_step),
+        Step("detect", _detect_step),
+        Step("extract", _extract_step),
+        Step("write_graph", _graph_step, compensate=_compensate("graph")),
+        Step("embed", _embed_step),
+        Step("upsert", _vector_step, compensate=_compensate("vector")),
     ])
+
+
+async def _publish_status(document_id: str, status: str) -> None:
+    payload = json.dumps({"document_id": document_id, "status": status}).encode()
+    await bus.publish(STATUS_SUBJECT, payload)
 
 
 async def _run_saga(data: bytes, _headers: dict[str, str]) -> None:
     job = json.loads(data or b"{}")
-    ctx: Ctx = {"document_id": job.get("document_id", "?"), "kb_id": job.get("kb_id", "?")}
+    doc_id = str(job.get("document_id", "?"))
+    ctx: Ctx = {
+        "document_id": doc_id,
+        "kb_id": job.get("kb_id", "?"),
+        "content_b64": job.get("content_b64", ""),
+    }
     with tracer("ingestion").start_as_current_span("ingestion.saga") as span:
-        span.set_attribute("document_id", str(ctx["document_id"]))
+        ctx["trace_id"] = format(span.get_span_context().trace_id, "032x")
+        span.set_attribute("document_id", doc_id)
+        await _publish_status(doc_id, "parsing")
         outcome = await _build_saga().run(ctx)
         span.set_attribute("saga.status", outcome.status.value)
         if outcome.status is SagaStatus.FAILED:
-            log.error(
-                "saga FAILED at %s for document_id=%s; compensated=%s; error=%s",
-                outcome.failed_step, ctx["document_id"], outcome.compensated, outcome.error,
-            )
-        else:
-            log.info("saga %s for document_id=%s", outcome.status.value, ctx["document_id"])
+            await _publish_status(doc_id, "failed")
+            log.error("saga FAILED at %s for %s: %s", outcome.failed_step, doc_id, outcome.error)
+        elif outcome.status is SagaStatus.DONE:
+            await _publish_status(doc_id, "done")
+            log.info("saga done for document_id=%s (domain=%s)", doc_id, ctx.get("domain"))
 
 
 async def _on_startup() -> None:
@@ -84,9 +138,6 @@ async def _ready() -> bool:
 
 
 app = create_app(
-    "ingestion",
-    settings=settings,
-    readiness=_ready,
-    on_startup=_on_startup,
-    on_shutdown=_on_shutdown,
+    "ingestion", settings=settings, readiness=_ready,
+    on_startup=_on_startup, on_shutdown=_on_shutdown,
 )

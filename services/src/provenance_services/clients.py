@@ -28,3 +28,12 @@ async def call(service: str, path: str, payload: dict[str, Any] | None = None) -
         resp = await client.post(f"{base}{path}", json=payload or {})
         resp.raise_for_status()
         return resp.json()
+
+
+async def call_get(service: str, path: str) -> dict[str, Any]:
+    """GET from another service and return its JSON."""
+    base = SERVICE_URLS[service]
+    async with traced_client() as client:
+        resp = await client.get(f"{base}{path}")
+        resp.raise_for_status()
+        return resp.json()
