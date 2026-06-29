@@ -1,9 +1,11 @@
 """Parse service — layout-aware OCR / table extraction (R60–R64).
 
 Backend selected by PARSE_ENGINE (R60):
-  * `docling` (default) — Docling document-understanding pipeline (layout + TableFormer +
-    reading order) with PaddleOCR (RapidOCR ONNX) for raster pages.
-  * `pdfplumber` — lightweight digital-first (pdfplumber) + RapidOCR fallback; air-gap-fast.
+  * `auto` (default) — a cheap probe routes each document: scanned or table-heavy → the
+    deep Docling path (layout + TableFormer + PaddleOCR, GPU-capable); clean prose →
+    the fast pdfplumber + RapidOCR path. "Deep parse only when it's worth it."
+  * `docling` — always the deep pipeline.
+  * `pdfplumber` — always the lightweight digital-first path; air-gap-fast.
 Both return typed elements with page + bbox + reading order and record provenance (R63).
 """
 
@@ -20,11 +22,17 @@ app = create_app("parse")
 
 
 def parse_document(content: bytes) -> ParseResult:
-    engine = os.environ.get("PARSE_ENGINE", "docling").lower()
+    from .parse_engine import needs_deep_parse, parse_pdf_bytes
+
+    engine = os.environ.get("PARSE_ENGINE", "auto").lower()
+    if engine == "auto":
+        engine = "docling" if needs_deep_parse(content) else "pdfplumber"
     if engine.startswith("docling"):
-        from .docling_parser import parse_pdf_bytes_docling
-        return parse_pdf_bytes_docling(content)
-    from .parse_engine import parse_pdf_bytes
+        try:
+            from .docling_parser import parse_pdf_bytes_docling
+            return parse_pdf_bytes_docling(content)
+        except Exception:  # docling unavailable (light deployment) → fall back
+            return parse_pdf_bytes(content)
     return parse_pdf_bytes(content)
 
 

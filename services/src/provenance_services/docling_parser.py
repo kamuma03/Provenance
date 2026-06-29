@@ -9,12 +9,36 @@ pdfplumber+RapidOCR backend (pulls torch); selected via PARSE_ENGINE=docling.
 from __future__ import annotations
 
 import io
+import os
 
 from provenance_contracts import BBox, ElementType, ParsedElement, ParseMethod, ParseResult
 
 DOCLING_ENGINE = "docling+paddleocr"
 
 _HEADINGS = {"section_header", "title", "page_header"}
+
+
+def _converter():  # type: ignore[no-untyped-def]
+    """Build a DocumentConverter honoring PARSE_USE_GPU (CUDA), falling back to CPU/auto."""
+    from docling.document_converter import DocumentConverter
+
+    use_gpu = os.environ.get("PARSE_USE_GPU", "false").lower() in ("1", "true", "yes")
+    try:
+        from docling.datamodel.base_models import InputFormat
+        from docling.datamodel.pipeline_options import (
+            AcceleratorDevice,
+            AcceleratorOptions,
+            PdfPipelineOptions,
+        )
+        from docling.document_converter import PdfFormatOption
+
+        device = AcceleratorDevice.CUDA if use_gpu else AcceleratorDevice.AUTO
+        opts = PdfPipelineOptions(accelerator_options=AcceleratorOptions(device=device))
+        return DocumentConverter(
+            format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=opts)}
+        )
+    except Exception:  # pragma: no cover - older docling API → default device
+        return DocumentConverter()
 
 
 def _bbox(prov_item, page_index: int) -> BBox:  # type: ignore[no-untyped-def]
@@ -26,11 +50,10 @@ def _bbox(prov_item, page_index: int) -> BBox:  # type: ignore[no-untyped-def]
 
 def parse_pdf_bytes_docling(content: bytes) -> ParseResult:
     from docling.datamodel.base_models import DocumentStream
-    from docling.document_converter import DocumentConverter
     from docling_core.types.doc import TableItem, TextItem
 
     source = DocumentStream(name="document.pdf", stream=io.BytesIO(content))
-    doc = DocumentConverter().convert(source).document
+    doc = _converter().convert(source).document
 
     elements: list[ParsedElement] = []
     order = 0

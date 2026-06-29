@@ -19,6 +19,25 @@ DIGITAL_ENGINE = "pdfplumber"
 DIGITAL_ENGINE_VERSION = pdfplumber.__version__
 
 
+def needs_deep_parse(content: bytes) -> bool:
+    """Cheap probe (no rendering) deciding if a doc warrants the deep Docling path.
+
+    Deep parse is worth it when a page is image-only (needs OCR) or table-bearing (needs
+    structure). Clean prose PDFs take the fast pdfplumber path. Drives PARSE_ENGINE=auto.
+    """
+    try:
+        with pdfplumber.open(io.BytesIO(content)) as pdf:
+            for page in pdf.pages:
+                lines = page.extract_text_lines() if hasattr(page, "extract_text_lines") else []
+                if not lines:  # image-only page → OCR (R61)
+                    return True
+                if page.find_tables():  # table-bearing → deep structure (R62)
+                    return True
+    except Exception:
+        return True  # unreadable by the light path → let Docling try
+    return False
+
+
 def _center_in(bbox: tuple[float, float, float, float], top: float, bottom: float) -> bool:
     """Is a line's vertical center inside a table's vertical span?"""
     cy = (top + bottom) / 2
