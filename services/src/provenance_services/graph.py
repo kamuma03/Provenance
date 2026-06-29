@@ -13,7 +13,7 @@ from provenance_contracts import EntityCandidate
 from provenance_service import create_app, tracer
 
 from .graph_store import GraphStore
-from .resolver import EntityResolver
+from .resolver import EntityResolver, normalize_name
 
 _KUZU_PATH = os.environ.get("KUZU_DB_PATH", "/tmp/provenance-kuzu")
 _store: GraphStore | None = None
@@ -75,6 +75,22 @@ async def write(req: Request) -> dict[str, object]:
 @app.get("/stats/{kb_id}", tags=["graph"])
 async def stats(kb_id: str) -> dict[str, int]:
     return {"entity_count": _get_store().entity_count(kb_id)}
+
+
+@app.post("/link", tags=["graph"])
+async def link(req: Request) -> dict[str, list[str]]:
+    """Query-time entity linking (R26): match query tokens to entity canonical names."""
+    body = await req.json()
+    kb_id = body.get("kb_id", "default")
+    q_tokens = set(normalize_name(body.get("text", "")).split())
+    with tracer("graph").start_as_current_span("graph.link"):
+        matched: list[str] = []
+        for eid, _type, name in _get_store().entities(kb_id):
+            name_tokens = set(normalize_name(name).split())
+            # Link when all of the entity's name tokens appear in the query.
+            if name_tokens and name_tokens <= q_tokens:
+                matched.append(eid)
+        return {"entity_ids": matched}
 
 
 @app.post("/expand", tags=["graph"])

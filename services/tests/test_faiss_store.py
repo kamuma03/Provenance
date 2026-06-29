@@ -51,6 +51,35 @@ async def test_metadata_filter() -> None:
     assert all(h.metadata["page"] == "2" for h in hits)
 
 
+@pytest.mark.asyncio
+async def test_hybrid_fuses_dense_and_sparse() -> None:
+    emb = DeterministicEmbedder(dim=64)
+    store = FaissVectorStore()
+    docs = {
+        "c1": "the quarterly revenue grew",
+        "c2": "supply chain disruption risk factor",
+        "c3": "board of directors meeting notes",
+    }
+    await store.upsert("kb1", [
+        VectorRecord(chunk_id=cid, embedding=emb.embed([t])[0], text=t, metadata={})
+        for cid, t in docs.items()
+    ])
+    # When dense (exact-vector match) and sparse (BM25 lexical) agree, the target ranks #1.
+    target = docs["c2"]
+    hits = await store.hybrid_query("kb1", emb.embed([target])[0], target, k=3)
+    assert hits and hits[0].chunk_id == "c2"
+
+
+@pytest.mark.asyncio
+async def test_hybrid_falls_back_when_no_text_for_bm25() -> None:
+    # Records without text => BM25 inert; hybrid still returns dense results (no crash).
+    emb = DeterministicEmbedder(dim=32)
+    store = FaissVectorStore()
+    await store.upsert("kb1", [VectorRecord(chunk_id="c1", embedding=emb.embed(["x"])[0])])
+    hits = await store.hybrid_query("kb1", emb.embed(["x"])[0], "x", k=3)
+    assert [h.chunk_id for h in hits] == ["c1"]
+
+
 def test_deterministic_embedder_is_stable_and_sized() -> None:
     emb = DeterministicEmbedder(dim=128)
     v1 = emb.embed(["hello"])[0]

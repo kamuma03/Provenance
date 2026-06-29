@@ -65,6 +65,18 @@ class GraphStore:
         )
         return int(res.get_next()[0]) if res.has_next() else 0
 
+    def entities(self, kb_id: str) -> list[tuple[str, str, str]]:
+        """All (id, type, canonical_name) for a KB — basis for query-time linking (R26)."""
+        res = self._conn.execute(
+            "MATCH (e:Entity) WHERE e.kb_id = $kb RETURN e.id, e.type, e.canonical_name",
+            {"kb": kb_id},
+        )
+        out: list[tuple[str, str, str]] = []
+        while res.has_next():
+            row = res.get_next()
+            out.append((row[0], row[1], row[2]))
+        return out
+
     def neighbors(self, entity_id: str) -> list[str]:
         """1-hop neighbor ids — the basis for additive graph expansion (R27)."""
         res = self._conn.execute(

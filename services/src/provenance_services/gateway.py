@@ -98,5 +98,6 @@ async def kb_stats(kb_id: str) -> dict[str, object]:
 @app.post("/query", tags=["gateway"])
 async def query(req: Request) -> dict[str, object]:
     body = await req.json()
+    payload = {"query": body.get("query", ""), "kb_id": body.get("kb_id", "default")}
     with tracer("gateway").start_as_current_span("gateway.query"):
-        return await call("query", "/answer", {"query": body.get("query", "")})
+        return await call("query", "/answer", payload)

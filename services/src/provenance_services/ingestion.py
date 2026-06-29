@@ -76,8 +76,11 @@ async def _embed_step(c: Ctx) -> None:
 
 async def _vector_step(c: Ctx) -> None:
     records = [
-        {"chunk_id": ch.id, "embedding": emb,
-         "metadata": {"document_id": str(c["document_id"]), "page": str(ch.page)}}
+        {"chunk_id": ch.id, "embedding": emb, "text": ch.text,
+         "metadata": {
+             "document_id": str(c["document_id"]), "page": str(ch.page),
+             "bbox": ch.bbox.model_dump_json(),  # carried for citation highlight (R36)
+         }}
         for ch, emb in zip(c["chunks"], c["embeddings"], strict=False)
     ]
     if records:

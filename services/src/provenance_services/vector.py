@@ -28,12 +28,18 @@ async def upsert(req: Request) -> dict[str, object]:
 
 @app.post("/query", tags=["vector"])
 async def query(req: Request) -> dict[str, object]:
+    """Dense by default; hybrid (dense + BM25) when `text` is provided (R24)."""
     body = await req.json()
-    with tracer("vector").start_as_current_span("vector.query"):
-        hits = await _store.query(
-            body.get("namespace", "default"),
-            body.get("vector", []),
-            int(body.get("k", 5)),
-            body.get("filter"),
-        )
+    namespace = body.get("namespace", "default")
+    vector = body.get("vector", [])
+    k = int(body.get("k", 5))
+    filter = body.get("filter")
+    text = body.get("text")
+    with tracer("vector").start_as_current_span("vector.query") as span:
+        if text:
+            hits = await _store.hybrid_query(namespace, vector, text, k, filter)
+            span.set_attribute("vector.mode", "hybrid")
+        else:
+            hits = await _store.query(namespace, vector, k, filter)
+            span.set_attribute("vector.mode", "dense")
         return {"hits": [h.model_dump() for h in hits]}

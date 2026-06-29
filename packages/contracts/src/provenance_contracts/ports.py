@@ -17,12 +17,14 @@ class VectorRecord(BaseModel):
 
     chunk_id: str
     embedding: list[float]
+    text: str = ""  # used for sparse (BM25) hybrid retrieval (R24)
     metadata: dict[str, str] = Field(default_factory=dict)
 
 
 class QueryHit(BaseModel):
     chunk_id: str
     score: float
+    text: str = ""  # chunk text, carried for rerank + evidence assembly
     metadata: dict[str, str] = Field(default_factory=dict)
 
 
