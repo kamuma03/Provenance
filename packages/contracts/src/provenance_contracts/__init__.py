@@ -27,6 +27,7 @@ from .messages import (
     SubqueryType,
     Verdict,
 )
+from .parse import ParsedElement, ParseResult
 from .ports import QueryHit, VectorRecord, VectorStorePort
 from .registry import (
     GENERIC_FALLBACK_ID,
@@ -45,6 +46,8 @@ __all__ = [
     # messages
     "Answer", "Citation", "Claim", "CriticStatus", "EvidenceSet", "Plan",
     "ScoredChunk", "Subquery", "SubqueryType", "Verdict",
+    # parse
+    "ParsedElement", "ParseResult",
     # ports
     "QueryHit", "VectorRecord", "VectorStorePort",
     # registry

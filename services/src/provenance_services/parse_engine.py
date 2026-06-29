@@ -11,28 +11,10 @@ from __future__ import annotations
 import io
 
 import pdfplumber
-from provenance_contracts import BBox, ElementType, ParseMethod
-from pydantic import BaseModel
+from provenance_contracts import BBox, ElementType, ParsedElement, ParseMethod, ParseResult
 
 DIGITAL_ENGINE = "pdfplumber"
 DIGITAL_ENGINE_VERSION = pdfplumber.__version__
-
-
-class ParsedElement(BaseModel):
-    element_type: ElementType
-    text: str
-    page: int
-    bbox: BBox
-    reading_order: int
-
-
-class ParseResult(BaseModel):
-    elements: list[ParsedElement]
-    pages: int
-    parse_method: ParseMethod  # dominant method across pages (R63)
-    page_methods: dict[int, ParseMethod]
-    engine: str
-    engine_version: str
 
 
 def _center_in(bbox: tuple[float, float, float, float], top: float, bottom: float) -> bool:
