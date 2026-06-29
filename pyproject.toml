@@ -20,6 +20,7 @@ dev = [
     "mypy>=1.11",
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
+    "reportlab>=4.0",  # test fixtures: synthesize born-digital PDFs
 ]
 
 [tool.ruff]

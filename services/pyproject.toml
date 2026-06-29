@@ -7,6 +7,7 @@ dependencies = [
     "provenance-contracts",
     "provenance-service",
     "asyncpg>=0.29",
+    "pdfplumber>=0.11",  # digital-first PDF parsing (MIT/pdfminer.six) — R61
 ]
 
 [build-system]
