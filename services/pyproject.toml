@@ -14,6 +14,9 @@ dependencies = [
     "rank-bm25>=0.2",    # sparse retrieval for hybrid (Apache-2.0) — R24
     "qdrant-client>=1.11",  # dedicated-server vector adapter (Apache-2.0) — R21
     "pgvector>=0.3",        # in-database vector adapter (PostgreSQL ext) — R21
+    "rapidocr-onnxruntime>=1.3",  # OCR fallback for image-only pages (Apache-2.0) — R61
+    "pypdfium2>=4.0",             # PDF page rendering for OCR (Apache-2.0/BSD) — R61
+    "pillow>=10.0",               # image handling for OCR rendering (HPND/permissive) — R61
 ]
 
 [build-system]

@@ -756,7 +756,7 @@ not raw performance. A datastore is admissible only if **permissively licensed**
 
 | Class | Admissible? | Examples |
 |---|---|---|
-| Permissive (Apache 2.0 / MIT / BSD / PostgreSQL) | ✅ | Postgres, Qdrant, Kuzu, FAISS, OpenSearch, NATS, Valkey, **Docling (MIT), PaddleOCR / Tesseract / docTR (Apache 2.0)** |
+| Permissive (Apache 2.0 / MIT / BSD / PostgreSQL) | ✅ | Postgres, Qdrant, Kuzu, FAISS, OpenSearch, NATS, Valkey, **RapidOCR (Apache 2.0, implemented offline OCR), Docling (MIT), PaddleOCR / Tesseract / docTR (Apache 2.0)** |
 | Weak copyleft (MPL) | ✅ (with note) | RabbitMQ |
 | Copyleft (GPL / AGPL) | ❌ default | Neo4j Community (GPLv3), Elasticsearch (AGPL), **MinerU (AGPL)** |
 | Source-available / restricted / non-commercial | ❌ | MongoDB, Redis 7.4+, Memgraph, ArangoDB (SSPL/BSL/RSAL); **Surya/Marker (revenue-restricted), Nougat (CC-BY-NC)** |

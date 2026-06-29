@@ -2,8 +2,8 @@
 
 Digital-first (R61): born-digital PDFs are parsed from their text layer with pdfplumber
 (fast, no models) — yielding typed elements with page + bbox + reading order, and tables
-kept as coherent units (R62, R68). Image-only pages fall back to OCR via the configured
-engine (Docling + PaddleOCR), which is loaded lazily and runs on the DGX Spark.
+kept as coherent units (R62, R68). Image-only pages fall back to OCR via RapidOCR (ONNX
+PaddleOCR, CPU, bbox-preserving — see ocr_engine.py); Docling is the richer Spark option.
 """
 
 from __future__ import annotations
@@ -12,6 +12,8 @@ import io
 
 import pdfplumber
 from provenance_contracts import BBox, ElementType, ParsedElement, ParseMethod, ParseResult
+
+from .ocr_engine import OCR_ENGINE_ID
 
 DIGITAL_ENGINE = "pdfplumber"
 DIGITAL_ENGINE_VERSION = pdfplumber.__version__
@@ -23,11 +25,13 @@ def _center_in(bbox: tuple[float, float, float, float], top: float, bottom: floa
     return bbox[1] <= cy <= bbox[3]
 
 
-def parse_pdf_bytes(content: bytes) -> ParseResult:
-    """Digital-first parse of a PDF. Pages without a text layer are flagged for OCR."""
+def parse_pdf_bytes(content: bytes, *, enable_ocr: bool = True) -> ParseResult:
+    """Digital-first parse; image-only pages fall back to OCR (R61). Returns typed
+    elements with page + bbox + reading order, recording the per-page parse method (R63)."""
     elements: list[ParsedElement] = []
     page_methods: dict[int, ParseMethod] = {}
     raw: list[tuple[int, float, float, ElementType, str, BBox]] = []
+    ocr_used = False
 
     with pdfplumber.open(io.BytesIO(content)) as pdf:
         n_pages = len(pdf.pages)
@@ -63,6 +67,17 @@ def parse_pdf_bytes(content: bytes) -> ParseResult:
                 ParseMethod.TEXT_LAYER if (lines or tables) else ParseMethod.OCR
             )
 
+    # OCR fallback for image-only pages (R61): render + RapidOCR, with real bboxes (R60).
+    image_pages = [p for p, m in page_methods.items() if m is ParseMethod.OCR]
+    if image_pages and enable_ocr:
+        from .ocr_engine import get_ocr
+
+        ocr = get_ocr()
+        for pidx in image_pages:
+            for text, bbox in ocr.ocr_pdf_page(content, pidx):
+                raw.append((pidx, bbox.y0, bbox.x0, ElementType.TEXT, text, bbox))
+                ocr_used = True
+
     # Reading order: sort by (page, top, x0) and number sequentially (R60).
     raw.sort(key=lambda r: (r[0], r[1], r[2]))
     for order, (page, _top, _x0, etype, text, bbox) in enumerate(raw):
@@ -70,13 +85,14 @@ def parse_pdf_bytes(content: bytes) -> ParseResult:
             ParsedElement(element_type=etype, text=text, page=page, bbox=bbox, reading_order=order)
         )
 
-    ocr_pages = [p for p, m in page_methods.items() if m is ParseMethod.OCR]
-    dominant = ParseMethod.OCR if (ocr_pages and not elements) else ParseMethod.TEXT_LAYER
+    dominant = ParseMethod.OCR if (ocr_used and not page_methods.get(0) == ParseMethod.TEXT_LAYER) \
+        else ParseMethod.TEXT_LAYER
+    engine = f"{DIGITAL_ENGINE}+{OCR_ENGINE_ID}" if ocr_used else DIGITAL_ENGINE
     return ParseResult(
         elements=elements,
         pages=n_pages,
         parse_method=dominant,
         page_methods=page_methods,
-        engine=DIGITAL_ENGINE,
+        engine=engine,
         engine_version=DIGITAL_ENGINE_VERSION,
     )

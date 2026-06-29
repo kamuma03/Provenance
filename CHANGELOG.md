@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **OCR fallback implemented** (R60–R63) — image-only/scanned PDFs are now read via
+  **RapidOCR** (ONNX PaddleOCR, CPU, Apache-2.0, models bundled) with pages rendered by
+  pypdfium2; OCR elements carry real page+bbox so citation highlight works on scans.
+  Previously only the digital-first (text-layer) path was wired. Verified end-to-end on a
+  genuinely image-only PDF. (Docling remains the richer Spark option.)
 - **P6 (multi-vendor, minus AWS)** — Qdrant (dedicated-server) and pgvector (in-database)
   adapters behind the `VectorStorePort`, plus OpenSearch/Weaviate stubs; a config-driven
   factory selects the backend via `VECTOR_BACKEND` (R20/R21/N4). Benchmark harness +

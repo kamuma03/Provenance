@@ -1,8 +1,8 @@
 """Parse service — layout-aware OCR / table extraction (R60–R64).
 
-Digital-first parsing via pdfplumber (born-digital PDFs); OCR fallback via Docling +
-PaddleOCR is loaded lazily for image-only pages (DGX Spark). Returns typed elements with
-page + bbox + reading order, and records the parse method as provenance (R63).
+Digital-first parsing via pdfplumber (born-digital PDFs); OCR fallback via RapidOCR
+(ONNX PaddleOCR, CPU) for image-only pages. Returns typed elements with page + bbox +
+reading order, and records the parse method as provenance (R63).
 """
 
 from __future__ import annotations
