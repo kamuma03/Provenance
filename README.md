@@ -94,7 +94,7 @@ docs/
   adr/                               # architecture decision records
 ```
 
-The Next.js app (`web/`) and the eval harness (`eval/`) land during P1–P5.
+The eval harness lives in `eval/`; the Next.js two-screen UI lives in `web/`.
 
 ## Documentation
 

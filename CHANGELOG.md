@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **P5 front-end** — Next.js (TypeScript, app router) two-screen UI: **Ingest** (KB
+  create with domain, upload, Quick/Full tier, status polling) and **Chat** (KB scope,
+  **SSE streaming** answer, citation panel with page+bbox highlight, live entity graph,
+  honest-refusal display). Gateway gains a `/query/stream` SSE endpoint (R35). The app
+  type-checks and builds clean (`next build`); visual/interaction verification needs a browser.
 - **P4 eval gate** — in-process harness runs the real pipeline (chunker, FAISS, Kuzu,
   retrieval core, crew) over a self-contained eval set and gates the build on §9.2
   thresholds: numeric exact-span (R42), domain-detection accuracy (R43), honest-refusal

@@ -11,13 +11,18 @@ import base64
 import hashlib
 import json
 import uuid
+from collections.abc import AsyncIterator
 
 from fastapi import Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from provenance_service import NatsBus, ServiceSettings, create_app, tracer
 
 from .catalog import Catalog
 from .clients import call, call_get
+
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 settings = ServiceSettings(service_name="gateway")  # type: ignore[call-arg]
 bus = NatsBus(settings.nats_url)
@@ -101,3 +106,27 @@ async def query(req: Request) -> dict[str, object]:
     payload = {"query": body.get("query", ""), "kb_id": body.get("kb_id", "default")}
     with tracer("gateway").start_as_current_span("gateway.query"):
         return await call("query", "/answer", payload)
+
+
+@app.post("/query/stream", tags=["gateway"])
+async def query_stream(req: Request) -> StreamingResponse:
+    """Stream the answer over SSE (R35): status → tokens → done{answer, evidence}."""
+    body = await req.json()
+    kb_id = body.get("kb_id", "default")
+    query_text = body.get("query", "")
+    payload = {"kb_id": kb_id, "query": query_text}
+
+    async def gen() -> AsyncIterator[str]:
+        yield _sse("status", {"phase": "retrieving"})
+        evidence = await call("query", "/retrieve", payload)  # chunks + entity_ids (R37/R36)
+        yield _sse("status", {"phase": "synthesizing"})
+        result = await call("query", "/answer", payload)
+        answer = result.get("answer", {})
+        if answer.get("refused"):
+            yield _sse("token", {"text": answer.get("text", "")})
+        else:
+            for word in answer.get("text", "").split():
+                yield _sse("token", {"text": word + " "})
+        yield _sse("done", {"answer": answer, "evidence": evidence})
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
