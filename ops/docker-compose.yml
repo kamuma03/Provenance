@@ -17,7 +17,7 @@ x-service-base: &service-base
     # Two local tiers defined once; tasks route to high/low (see packages/service llm.py).
     # Flip a task to anthropic:... to A/B against Claude; keep EVAL_JUDGE on Claude as the
     # trusted ruler while measuring local generators.
-    LLM_LOCAL_BASE_URL: http://ollama:11434/v1
+    LLM_LOCAL_BASE_URL: ${LLM_LOCAL_BASE_URL-http://ollama:11434/v1}  # empty ⇒ heuristic (no local server)
     LLM_TIER_HIGH: local:qwen3.6:27b      # capable model: synthesis + critique
     LLM_TIER_LOW: local:qwen3.5:9b        # fast model: detection, planning, bulk extraction
     LLM_EXTRACTION: low
@@ -60,6 +60,7 @@ services:
   # loads each, keeping both tiers warm (128GB unified memory on the Spark fits both).
   ollama:
     image: ollama/ollama:latest
+    profiles: ["llm"]                    # opt-in: started by scripts/start.sh (or --profile llm)
     volumes:
       - ollama_data:/root/.ollama
     ports: ["11434:11434"]
@@ -76,6 +77,7 @@ services:
   # One-shot: pull the two tier models into the shared volume, then exit.
   ollama-pull:
     image: ollama/ollama:latest
+    profiles: ["llm"]
     depends_on:
       - ollama
     environment:

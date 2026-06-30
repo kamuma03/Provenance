@@ -58,9 +58,11 @@ Every datastore is permissively licensed (Apache 2.0 / MIT / BSD / PostgreSQL) â
 ## Getting started
 
 ```bash
-# Prerequisites: Docker + Docker Compose. (An LLM endpoint is only needed from P1.)
-cd ops
-docker compose up -d          # builds + starts all 8 services + NATS + Postgres + OTel collector
+# Prerequisites: Docker + Docker Compose. (An NVIDIA GPU enables the local LLM tier.)
+scripts/start.sh              # builds + starts all 8 services + NATS + Postgres + OTel;
+                              # adds the Ollama LLM tier automatically when a GPU is present
+# scripts/start.sh --no-llm   # heuristic agents only (no GPU / no model pulls)
+# scripts/stop.sh             # stop (add --clean to drop data volumes)
 
 # Exercise the skeleton:
 curl localhost:8000/health
