@@ -38,6 +38,14 @@ strict = true
 ignore_missing_imports = true
 plugins = ["pydantic.mypy"]
 
+# numpy's bundled stubs use 3.12-only `type` syntax that mypy rejects under py311; we don't
+# type-check against numpy internals (it arrives transitively via PIL/rapidocr) — skip them.
+# docling/docling_core are optional, heavy, untyped deps (the deep-parse path) — same treatment.
+[[tool.mypy.overrides]]
+module = ["numpy", "numpy.*", "docling.*", "docling_core.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["packages", "services", "eval"]

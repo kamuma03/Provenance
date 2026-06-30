@@ -7,7 +7,7 @@ client propagates the W3C trace context so a call shows up in the same trace (R5
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, cast
 
 from provenance_service import traced_client
 
@@ -27,7 +27,7 @@ async def call(service: str, path: str, payload: dict[str, Any] | None = None) -
     async with traced_client() as client:
         resp = await client.post(f"{base}{path}", json=payload or {})
         resp.raise_for_status()
-        return resp.json()
+        return cast("dict[str, Any]", resp.json())
 
 
 async def call_get(service: str, path: str) -> dict[str, Any]:
@@ -36,4 +36,4 @@ async def call_get(service: str, path: str) -> dict[str, Any]:
     async with traced_client() as client:
         resp = await client.get(f"{base}{path}")
         resp.raise_for_status()
-        return resp.json()
+        return cast("dict[str, Any]", resp.json())

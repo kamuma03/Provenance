@@ -7,6 +7,8 @@ are rendered with pypdfium2. (Docling + full PaddleOCR remain the richer Spark o
 
 from __future__ import annotations
 
+from typing import Any
+
 from provenance_contracts import BBox
 
 OCR_ENGINE_ID = "rapidocr-onnxruntime"
@@ -17,7 +19,7 @@ class OcrEngine:
     def __init__(self) -> None:
         self._ocr = None  # lazy: model init is the costly part
 
-    def _engine(self):  # type: ignore[no-untyped-def]
+    def _engine(self) -> Any:
         if self._ocr is None:
             from rapidocr_onnxruntime import RapidOCR
 

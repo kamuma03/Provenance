@@ -26,7 +26,7 @@ jobs:
         run: uv run ruff check packages services eval scripts
 
       - name: Type-check (mypy)
-        run: uv run mypy packages/contracts/src packages/service/src
+        run: uv run mypy packages/contracts/src packages/service/src services/src
 
       - name: Unit tests
         run: uv run pytest packages services eval -q

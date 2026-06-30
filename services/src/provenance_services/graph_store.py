@@ -7,6 +7,8 @@ kb_id + document_id + trace_id for provenance (R56). Embedded (no server) per AD
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import kuzu
 from provenance_contracts import Entity
 from pydantic import BaseModel
@@ -59,32 +61,36 @@ class GraphStore:
              "kb": kb_id, "doc": document_id, "tid": trace_id or ""},
         )
 
+    def _query(self, statement: str, params: dict[str, Any]) -> kuzu.QueryResult:
+        """Execute a single read statement (always one QueryResult, never a list)."""
+        return cast("kuzu.QueryResult", self._conn.execute(statement, params))
+
     def entity_count(self, kb_id: str) -> int:
-        res = self._conn.execute(
+        res = self._query(
             "MATCH (e:Entity) WHERE e.kb_id = $kb RETURN count(e)", {"kb": kb_id}
         )
-        return int(res.get_next()[0]) if res.has_next() else 0
+        return int(cast("list[Any]", res.get_next())[0]) if res.has_next() else 0
 
     def entities(self, kb_id: str) -> list[tuple[str, str, str]]:
         """All (id, type, canonical_name) for a KB — basis for query-time linking (R26)."""
-        res = self._conn.execute(
+        res = self._query(
             "MATCH (e:Entity) WHERE e.kb_id = $kb RETURN e.id, e.type, e.canonical_name",
             {"kb": kb_id},
         )
         out: list[tuple[str, str, str]] = []
         while res.has_next():
-            row = res.get_next()
+            row = cast("list[Any]", res.get_next())
             out.append((row[0], row[1], row[2]))
         return out
 
     def neighbors(self, entity_id: str) -> list[str]:
         """1-hop neighbor ids — the basis for additive graph expansion (R27)."""
-        res = self._conn.execute(
+        res = self._query(
             "MATCH (a:Entity {id: $id})-[:Rel]-(b:Entity) RETURN DISTINCT b.id", {"id": entity_id}
         )
         out: list[str] = []
         while res.has_next():
-            out.append(res.get_next()[0])
+            out.append(cast("list[Any]", res.get_next())[0])
         return out
 
     def close(self) -> None:

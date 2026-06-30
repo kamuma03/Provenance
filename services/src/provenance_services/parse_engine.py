@@ -99,9 +99,11 @@ def parse_pdf_bytes(content: bytes, *, enable_ocr: bool = True) -> ParseResult:
 
     # Reading order: sort by (page, top, x0) and number sequentially (R60).
     raw.sort(key=lambda r: (r[0], r[1], r[2]))
-    for order, (page, _top, _x0, etype, text, bbox) in enumerate(raw):
+    for order, (pageno, _top, _x0, etype, text, bbox) in enumerate(raw):
         elements.append(
-            ParsedElement(element_type=etype, text=text, page=page, bbox=bbox, reading_order=order)
+            ParsedElement(
+                element_type=etype, text=text, page=pageno, bbox=bbox, reading_order=order
+            )
         )
 
     dominant = ParseMethod.OCR if (ocr_used and not page_methods.get(0) == ParseMethod.TEXT_LAYER) \

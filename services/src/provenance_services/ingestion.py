@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import cast
 
-from provenance_contracts import ParsedElement
+from provenance_contracts import Chunk, ParsedElement
 from provenance_service import NatsBus, ServiceSettings, create_app, tracer
 
 from .chunker import chunk_elements
@@ -22,7 +23,7 @@ from .saga import Ctx, Saga, SagaStatus, Step
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("ingestion")
 
-settings = ServiceSettings(service_name="ingestion")  # type: ignore[call-arg]
+settings = ServiceSettings(service_name="ingestion")
 bus = NatsBus(settings.nats_url)
 
 INGEST_SUBJECT = "ingest.jobs"
@@ -42,13 +43,15 @@ async def _parse_step(c: Ctx) -> None:
 
 
 async def _chunk_step(c: Ctx) -> None:
+    elements = cast("list[ParsedElement]", c["elements"])
     c["chunks"] = chunk_elements(
-        c["elements"], document_id=str(c["document_id"]), kb_id=str(c["kb_id"])
+        elements, document_id=str(c["document_id"]), kb_id=str(c["kb_id"])
     )
 
 
 async def _detect_step(c: Ctx) -> None:
-    sample = "\n".join(ch.text for ch in c["chunks"])[:2000]
+    chunks = cast("list[Chunk]", c["chunks"])
+    sample = "\n".join(ch.text for ch in chunks)[:2000]
     c["sample"] = sample
     resp = await call("extraction", "/detect", {"text": sample})
     c["domain"] = resp.get("domain", "generic")
@@ -69,19 +72,22 @@ async def _graph_step(c: Ctx) -> None:
 
 
 async def _embed_step(c: Ctx) -> None:
-    texts = [ch.text for ch in c["chunks"]]
+    chunks = cast("list[Chunk]", c["chunks"])
+    texts = [ch.text for ch in chunks]
     resp = await call("model", "/embed", {"texts": texts})
     c["embeddings"] = resp.get("embeddings", [])
 
 
 async def _vector_step(c: Ctx) -> None:
+    chunks = cast("list[Chunk]", c["chunks"])
+    embeddings = cast("list[list[float]]", c["embeddings"])
     records = [
         {"chunk_id": ch.id, "embedding": emb, "text": ch.text,
          "metadata": {
              "document_id": str(c["document_id"]), "page": str(ch.page),
              "bbox": ch.bbox.model_dump_json(),  # carried for citation highlight (R36)
          }}
-        for ch, emb in zip(c["chunks"], c["embeddings"], strict=False)
+        for ch, emb in zip(chunks, embeddings, strict=False)
     ]
     if records:
         await call("vector", "/upsert", {"namespace": c["kb_id"], "records": records})

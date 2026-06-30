@@ -12,6 +12,7 @@ import hashlib
 import json
 import uuid
 from collections.abc import AsyncIterator
+from typing import Any
 
 from fastapi import Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -21,10 +22,10 @@ from .catalog import Catalog
 from .clients import call, call_get
 
 
-def _sse(event: str, data: dict) -> str:
+def _sse(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
-settings = ServiceSettings(service_name="gateway")  # type: ignore[call-arg]
+settings = ServiceSettings(service_name="gateway")
 bus = NatsBus(settings.nats_url)
 catalog = Catalog()
 

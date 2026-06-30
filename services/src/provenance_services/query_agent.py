@@ -41,7 +41,7 @@ async def _rerank(query: str, hits: list[QueryHit]) -> list[QueryHit]:
 
 async def _link(kb_id: str, text: str) -> list[str]:
     resp = await call("graph", "/link", {"kb_id": kb_id, "text": text})
-    return resp.get("entity_ids", [])
+    return list(resp.get("entity_ids", []))
 
 
 async def _expand(entity_ids: list[str]) -> list[str]:

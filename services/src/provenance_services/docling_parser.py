@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 import os
+from typing import Any
 
 from provenance_contracts import BBox, ElementType, ParsedElement, ParseMethod, ParseResult
 
@@ -18,7 +19,7 @@ DOCLING_ENGINE = "docling+paddleocr"
 _HEADINGS = {"section_header", "title", "page_header"}
 
 
-def _converter():  # type: ignore[no-untyped-def]
+def _converter() -> Any:
     """Build a DocumentConverter honoring PARSE_USE_GPU (CUDA), falling back to CPU/auto."""
     from docling.document_converter import DocumentConverter
 
