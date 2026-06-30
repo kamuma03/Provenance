@@ -62,6 +62,40 @@ def test_router_defaults_to_heuristic_when_unconfigured(monkeypatch: pytest.Monk
     assert get_llm("detection") is None
 
 
+def test_tier_alias_expands_to_underlying_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_TIER_HIGH", "local:qwen3.6:27b")
+    monkeypatch.setenv("LLM_TIER_LOW", "local:qwen3.5:9b")
+    monkeypatch.setenv("LLM_LOCAL_BASE_URL", "http://ollama:11434/v1")
+
+    high = client_from_spec("high")
+    low = client_from_spec("low")
+    assert isinstance(high, OpenAICompatLLMClient) and high.model_id == "qwen3.6:27b"
+    assert isinstance(low, OpenAICompatLLMClient) and low.model_id == "qwen3.5:9b"
+
+
+def test_tier_alias_routes_via_per_task_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The common config: define two models once, point tasks at high/low.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.setenv("LLM_TIER_HIGH", "anthropic:claude-opus-4-8")
+    monkeypatch.setenv("LLM_TIER_LOW", "local:qwen3.5:9b")
+    monkeypatch.setenv("LLM_LOCAL_BASE_URL", "http://ollama:11434/v1")
+    monkeypatch.setenv("LLM_CRITIC", "high")
+    monkeypatch.setenv("LLM_PLANNER", "low")
+
+    critic = get_llm("critic")
+    planner = get_llm("planner")
+    assert isinstance(critic, AnthropicLLMClient) and critic.model_id == "claude-opus-4-8"
+    assert isinstance(planner, OpenAICompatLLMClient) and planner.model_id == "qwen3.5:9b"
+
+
+def test_tier_alias_unset_or_self_referential_is_heuristic(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("LLM_TIER_HIGH", raising=False)
+    assert client_from_spec("high") is None  # tier undefined → heuristic, not an error
+
+    monkeypatch.setenv("LLM_TIER_HIGH", "low")  # alias → alias: resolves to None, no loop
+    assert client_from_spec("high") is None
+
+
 @pytest.mark.asyncio
 async def test_openai_compat_posts_chat_completions(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict = {}

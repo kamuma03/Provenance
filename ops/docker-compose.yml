@@ -13,6 +13,20 @@ x-service-base: &service-base
     # Sandbox/compose: deterministic embedder + lexical reranker (no model downloads).
     # Unset on the DGX Spark to use the real fastembed models.
     PROVENANCE_OFFLINE: "1"
+    # ---- LLM routing (A2) ----
+    # Two local tiers defined once; tasks route to high/low (see packages/service llm.py).
+    # Flip a task to anthropic:... to A/B against Claude; keep EVAL_JUDGE on Claude as the
+    # trusted ruler while measuring local generators.
+    LLM_LOCAL_BASE_URL: http://ollama:11434/v1
+    LLM_TIER_HIGH: local:qwen3.6:27b      # capable model: synthesis + critique
+    LLM_TIER_LOW: local:qwen3.5:9b        # fast model: detection, planning, bulk extraction
+    LLM_EXTRACTION: low
+    LLM_DETECTION: low
+    LLM_PLANNER: low
+    LLM_SYNTHESIZER: high
+    LLM_CRITIC: high
+    LLM_EVAL_JUDGE: ${LLM_EVAL_JUDGE:-anthropic:claude-opus-4-8}
+    ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
   depends_on:
     - nats
     - otel-collector
@@ -40,6 +54,35 @@ services:
     command: ["--config=/etc/otel-collector.yaml"]
     volumes:
       - ./otel-collector.yaml:/etc/otel-collector.yaml:ro
+
+  # ---- local LLM serving (Ollama; OpenAI-compatible at /v1) ----
+  # On-demand multi-model load by name: the router sends per-task model names and Ollama
+  # loads each, keeping both tiers warm (128GB unified memory on the Spark fits both).
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
+    ports: ["11434:11434"]
+    # GPU passthrough (needs nvidia-container-toolkit on the host; ignored on CPU-only).
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  # One-shot: pull the two tier models into the shared volume, then exit.
+  ollama-pull:
+    image: ollama/ollama:latest
+    depends_on:
+      - ollama
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["ollama pull qwen3.6:27b && ollama pull qwen3.5:9b"]
+    restart: "no"
 
   # ---- application services (8) ----
   gateway:
@@ -101,3 +144,4 @@ services:
 
 volumes:
   kuzu_data:
+  ollama_data:

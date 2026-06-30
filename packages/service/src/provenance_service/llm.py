@@ -9,6 +9,10 @@ Spec grammar: "<provider>:<model>" — provider ∈ anthropic | local | openai |
 ollama. Empty / "heuristic" / "none" ⇒ no client (heuristic mode). A provider that isn't
 actually available (no API key, no base URL) resolves to None, so the system degrades to
 heuristics rather than erroring.
+
+Tier aliases: a spec of "high" or "low" expands to LLM_TIER_HIGH / LLM_TIER_LOW, so you
+define the two models (e.g. a capable 27B and a fast 9B local pair, or Claude tiers) once
+and route each task to a tier — swapping the underlying model is then a one-line change.
 """
 
 from __future__ import annotations
@@ -107,12 +111,19 @@ DEFAULT_ROUTES: dict[str, str] = {
 }
 
 _LOCAL_PROVIDERS = {"local", "openai", "vllm", "ollama", "sglang"}
+_TIER_ENV = {"high": "LLM_TIER_HIGH", "low": "LLM_TIER_LOW"}
 
 
 def client_from_spec(spec: str) -> LLMClient | None:
-    """Resolve a "<provider>:<model>" spec to a client, or None if unavailable/heuristic."""
+    """Resolve a "<provider>:<model>" spec to a client, or None if unavailable/heuristic.
+
+    A "high"/"low" tier alias expands to LLM_TIER_HIGH / LLM_TIER_LOW (one level — an
+    alias that points at another alias resolves to heuristic, never loops).
+    """
     spec = (spec or "").strip()
-    if not spec or spec in ("heuristic", "none", "off"):
+    if spec.lower() in _TIER_ENV:
+        spec = os.environ.get(_TIER_ENV[spec.lower()], "").strip()
+    if not spec or spec.lower() in ("heuristic", "none", "off", "high", "low"):
         return None
     provider, _, model = spec.partition(":")
     provider = provider.lower()
