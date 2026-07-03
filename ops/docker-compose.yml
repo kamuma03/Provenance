@@ -13,6 +13,11 @@ x-service-base: &service-base
     # Sandbox/compose: deterministic embedder + lexical reranker (no model downloads).
     # Unset on the DGX Spark to use the real fastembed models.
     PROVENANCE_OFFLINE: "1"
+    # ---- ONNX model selection (R66/R24) ----
+    # The embedder + reranker models, sourced from .env so it's the single source of truth.
+    # Defaults match .env; overridden per env. Only used when PROVENANCE_OFFLINE is unset.
+    EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-small-en-v1.5}
+    RERANKER_MODEL: ${RERANKER_MODEL:-BAAI/bge-reranker-v2-m3}
     # ---- LLM routing (A2) ----
     # Two local tiers defined once; tasks route to high/low (see packages/service llm.py).
     # Flip a task to anthropic:... to A/B against Claude; keep EVAL_JUDGE on Claude as the
