@@ -7,6 +7,8 @@ currently returns the retrieved evidence with a placeholder synthesis.
 
 from __future__ import annotations
 
+from typing import cast
+
 from fastapi import Request
 from provenance_contracts import EvidenceSet, QueryHit
 from provenance_service import create_app, tracer
@@ -66,7 +68,7 @@ async def retrieve_endpoint(req: Request) -> dict[str, object]:
         evidence = await retrieve(kb_id, query, _deps(), k=int(body.get("k", 5)))
         span.set_attribute("retrieve.chunks", len(evidence.chunks))
         span.set_attribute("retrieve.graph_expanded", evidence.graph_expanded)
-        return evidence.model_dump()
+        return cast("dict[str, object]", evidence.model_dump())
 
 
 @app.post("/answer", tags=["query"])

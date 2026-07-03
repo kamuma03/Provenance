@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import os
+from typing import cast
 
 from fastapi import Request
 from provenance_contracts import ParseResult
@@ -48,4 +49,4 @@ async def parse(req: Request) -> dict[str, object]:
         result = parse_document(base64.b64decode(content_b64))
         span.set_attribute("parse.elements", len(result.elements))
         span.set_attribute("parse.engine", result.engine)
-        return result.model_dump()
+        return cast("dict[str, object]", result.model_dump())

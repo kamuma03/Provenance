@@ -5,6 +5,8 @@ Owns the domain registry. P0: no-op shell returning the generic fallback.
 
 from __future__ import annotations
 
+from typing import cast
+
 from fastapi import Request
 from provenance_contracts import GENERIC_FALLBACK_ID, REGISTRY
 from provenance_service import create_app, get_llm, tracer
@@ -47,4 +49,4 @@ async def extract_entities(req: Request) -> dict[str, object]:
         result = await run_extract(text, spec, llm)
         span.set_attribute("extract.entities", len(result.entities))
         span.set_attribute("extract.llm", client is not None)
-        return result.model_dump()
+        return cast("dict[str, object]", result.model_dump())
