@@ -1,6 +1,8 @@
 # Architecture
 
-This is the design overview. The authoritative, requirement-level source is
+This is the design overview. For the **detailed, file-by-file / function-by-function reference**
+(plus the deployment model — compose overlays, models, GPU — and end-to-end flows) see
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). The authoritative, requirement-level source is
 [`docs/plans/provenance-requirements.md`](docs/plans/provenance-requirements.md)
 (R1–R71, N1–N9, Appendices A–C). Decisions are recorded as ADRs in [`docs/adr/`](docs/adr/).
 
@@ -43,7 +45,7 @@ Gateway / BFF ──────────► Catalog (Postgres): KB / Documen
 | Extraction | Domain registry | Domain detection + schema-driven extraction | LLM-bound |
 | Vector | Vector indices | `VectorStorePort`: FAISS / Qdrant / pgvector | stateful |
 | Graph | Kuzu LPG | Typed nodes/edges, entity resolution, graph expansion | stateful |
-| Model | model weights | Embeddings + cross-encoder reranker | **GPU** (only one) |
+| Model | model weights | Embeddings (`bge-small`) + cross-encoder reranker (`bge-reranker-v2-m3`), both ONNX | **GPU** |
 | Query / Agent | — | Retrieval core (`query()`) + Planner/Retriever/Critic/Synthesizer | LLM + CPU |
 
 Two deliberate **non-splits**: the 4-agent crew lives in one Query/Agent service, and
@@ -85,11 +87,24 @@ groundedness claim-by-claim; the Synthesizer composes the cited answer.
 
 ## Deployment
 
-Same images, two targets (R58): `docker compose up` air-gapped on the DGX Spark, or
-ECS/EKS on AWS (managed equivalents swapped by config). See Appendix B.7 of the spec.
+Same image (one multi-stage `Dockerfile`), layered **compose overlays** (details in
+[`docs/ARCHITECTURE.md` §3](docs/ARCHITECTURE.md#3-deployment-model-compose-overlays-models-gpu)):
+
+- **base** (`ops/docker-compose.yml`) — hermetic: deterministic embedder + lexical reranker, no
+  model downloads. CI / air-gap smoke.
+- **+ online** (`docker-compose.online.yml`) — real fastembed embeddings + reranker; LLM via the
+  host Ollama.
+- **+ gpu** (`docker-compose.gpu.yml`) — the ONNX models (embeddings + reranker; OCR) on CUDA via
+  `onnxruntime-gpu`, GPU granted to `model`/`query-agent`/`parse`.
+
+The onnxruntime-gpu wheel is aarch64/CUDA-13 (the reference machine is the DGX Spark); the image
+build guards the GPU swap by `TARGETARCH`, so an x86 build falls back cleanly to CPU onnxruntime.
+Same images also target ECS/EKS on AWS (managed equivalents by config, R58 — deferred slice).
 
 ## Tech stack
 
-Python/FastAPI services · Next.js/TypeScript UI · LlamaIndex (retrieval) · AutoGen
-(agents) · Kuzu (graph) · Postgres + FAISS/Qdrant/pgvector (data) · NATS (queue) ·
-Docling + PaddleOCR (parsing) · RAGAS (eval) · OpenTelemetry (tracing) · Claude (LLM).
+Python/FastAPI services · Next.js/TypeScript UI · hybrid retrieval (FAISS + BM25 RRF) + cross-encoder
+rerank · a 4-agent crew (Planner/Retriever/Critic/Synthesizer) · Kuzu (graph) · Postgres +
+FAISS/Qdrant/pgvector (data) · NATS (queue) · Docling + PaddleOCR/RapidOCR (parsing) · fastembed +
+onnxruntime-gpu (`bge-small` + `bge-reranker-v2-m3`) · local LLM tiers (Ollama `qwen`,
+OpenAI-compatible) with Claude as A/B + eval judge · RAGAS (eval) · OpenTelemetry (tracing).

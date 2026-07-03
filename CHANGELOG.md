@@ -8,6 +8,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Fully-online GPU deployment** — the whole stack runs online with real models,
+  GPU-accelerated on the DGX Spark (GB10, aarch64, CUDA 13). Layered compose overlays:
+  `ops/docker-compose.online.yml` (real fastembed embeddings + reranker; LLM via the host
+  Ollama over `host.docker.internal`) and `ops/docker-compose.gpu.yml` (grants the GPU to
+  `model`/`query-agent`/`parse` and sets `PROVENANCE_ONNX_CUDA`). Verified end-to-end: upload a
+  PDF → saga → cited, grounded answer with page + bbox.
+- **ONNX models on GPU** — the `Dockerfile` is now multi-stage on a CUDA base and swaps the CPU
+  onnxruntime for **`onnxruntime-gpu`** (aarch64/cu130 from NVIDIA's SBSA index) so fastembed
+  embeddings (`bge-small`) and the cross-encoder reranker run on `CUDAExecutionProvider`. The GPU
+  swap is guarded by `TARGETARCH` (`--build-arg ONNXRUNTIME_GPU=1|0`) so x86/CPU builds fall back
+  cleanly. `bge-reranker-v2-m3` — which no fastembed release ships — is exported to ONNX in a
+  build-only stage and loaded by a new `OnnxCrossEncoderReranker` (onnxruntime + `tokenizers`, no
+  transformers/optimum at runtime). `EMBEDDING_MODEL`/`RERANKER_MODEL` are threaded through compose
+  so `.env` is the single source of truth (R66/R24).
+- **Online-path robustness** — made the online path production-ready: configurable inter-service
+  timeout (`SERVICE_CALL_TIMEOUT_S`, default 180s — the agentic `/answer` path + cold model loads
+  exceed 10s); `reasoning_effort` on the local-LLM client (`LLM_REASONING_EFFORT`, default `none`)
+  so reasoning models emit content instead of an empty hidden trace; lazy catalog reconnect so a
+  gateway that boots before Postgres self-heals (N6); gateway CORS (`CORS_ALLOW_ORIGINS`) for the
+  cross-origin browser UI.
+- **Detailed architecture doc** — [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): file-by-file /
+  function-by-function reference, the deployment model, and the end-to-end ingestion + query flows.
+- **Retrieval-relevance test** — an opt-in variant that runs the real `bge-small` embedder and
+  asserts genuine ranking quality (revenue chunk ranked #1 among distractors), where the offline
+  hash embedder cannot — proving the hermetic suite validates wiring, not relevance.
 - **Multi-provider LLM routing** (A2) — `LLMClient` gains an `OpenAICompatLLMClient`
   (covers vLLM / Ollama / SGLang via one OpenAI-compatible base URL) alongside the
   Anthropic (Claude) client, plus a per-task router `get_llm(task)` configured by

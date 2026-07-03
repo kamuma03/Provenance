@@ -7,12 +7,17 @@ Upload documents into named knowledge bases; Provenance auto-detects the domain,
 ![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)
 ![Python](https://img.shields.io/badge/Python-3.11+-green.svg)
 ![Node](https://img.shields.io/badge/Node-20+-green.svg)
-![Status](https://img.shields.io/badge/status-pre--alpha%20(planning%20complete)-orange.svg)
+![Status](https://img.shields.io/badge/status-alpha%20(P0–P6%20implemented)-green.svg)
 
-> **Status:** P0 **walking skeleton implemented & verified** — all 8 services run under
-> `docker compose`, with one distributed trace spanning the ingestion saga (7 services, across
-> the async NATS boundary) and the query fan-out (5 services). No feature logic yet; that begins
-> in P1. Full spec: [`docs/plans/provenance-requirements.md`](docs/plans/provenance-requirements.md).
+> **Status:** the full pipeline is **implemented and verified end-to-end** — ingestion
+> (parse/OCR → chunk → detect → extract → graph + vectors), the retrieval + agentic-crew query
+> path, and the eval gate all run on real engines. It runs **fully online with real models,
+> GPU-accelerated** on the DGX Spark: ONNX embeddings (`bge-small`) and cross-encoder reranker
+> (`bge-reranker-v2-m3`) on CUDA, a local LLM tier (Ollama `qwen`), and Docling/PaddleOCR parsing —
+> upload a PDF and get cited, grounded answers with page + bbox. See
+> **[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)** for the detailed, file-by-file architecture and
+> [`docs/plans/provenance-requirements.md`](docs/plans/provenance-requirements.md) for the spec.
+> (The AWS deployment slice remains deferred.)
 
 ---
 
@@ -51,26 +56,40 @@ Next.js UI ──SSE──► Gateway/BFF ──┬─ async (NATS) ─► Inges
 | Retrieval | LlamaIndex (hybrid + rerank + graph expansion) |
 | Agents | AutoGen (Planner / Retriever / Critic / Synthesizer) |
 | Eval | RAGAS + hallucination + domain-detection accuracy, as a CI gate |
-| LLM | Claude (configurable endpoint) |
+| Embeddings + reranker | fastembed ONNX (`bge-small` + `bge-reranker-v2-m3`) on GPU via onnxruntime-gpu |
+| LLM | local tiers (Ollama `qwen`, OpenAI-compatible) with Claude as an A/B + eval judge |
 
 Every datastore is permissively licensed (Apache 2.0 / MIT / BSD / PostgreSQL) — a CI license-audit fails the build on any SSPL/BSL/GPL component, keeping the on-prem claim legal-clean.
 
 ## Getting started
 
-```bash
-# Prerequisites: Docker + Docker Compose. (An NVIDIA GPU enables the local LLM tier.)
-scripts/start.sh              # builds + starts all 8 services + NATS + Postgres + OTel;
-                              # adds the Ollama LLM tier automatically when a GPU is present
-# scripts/start.sh --no-llm   # heuristic agents only (no GPU / no model pulls)
-# scripts/stop.sh             # stop (add --clean to drop data volumes)
+The stack runs from **layered compose overlays** — the base is hermetic (no models); overlays turn
+on real models and the GPU (details in [`docs/ARCHITECTURE.md` §3](docs/ARCHITECTURE.md#3-deployment-model-compose-overlays-models-gpu)):
 
-# Exercise the skeleton:
+```bash
+# Prerequisites: Docker + Docker Compose. GPU path needs an NVIDIA GPU + nvidia-container-toolkit,
+# and a local Ollama serving the tier models (qwen3.6:27b / qwen3.5:9b).
+
+# 1) Hermetic (deterministic embedder + lexical reranker, no downloads) — CI / air-gap smoke:
+docker compose -f ops/docker-compose.yml up -d
+
+# 2) Fully online with real models (LLM via host Ollama):
+docker compose -f ops/docker-compose.yml -f ops/docker-compose.online.yml up -d
+
+# 3) Fully online + ONNX models (embeddings + reranker) on GPU:
+docker compose -f ops/docker-compose.yml \
+               -f ops/docker-compose.online.yml \
+               -f ops/docker-compose.gpu.yml up -d
+
+# (scripts/start.sh also brings the stack up and auto-adds the Ollama tier when a GPU is present.)
+
+# Exercise it (real cited answers on paths 2/3):
 curl localhost:8000/health
 KB=$(curl -s -XPOST localhost:8000/kb -d '{"name":"Demo","domain_id":"sec_financial"}'); echo $KB
-curl -XPOST localhost:8000/kb/<kb_id>/documents -d '{"source":"demo.pdf","content":"hi"}'   # 202 queued → saga
-curl -XPOST localhost:8000/query -d '{"query":"risk factors?"}'                              # fan-out → answer
+curl -XPOST localhost:8000/kb/<kb_id>/documents -d '{"source":"demo.pdf","content_b64":"<base64 PDF>"}'  # 202 → saga
+curl -XPOST localhost:8000/query -d '{"kb_id":"<kb_id>","query":"What revenue did the company report?"}'  # cited answer
 
-docker compose logs otel-collector   # see the trace spanning services
+cd web && npm install && npm run dev   # the two-screen UI at http://localhost:3000
 ```
 
 Run the local checks (what CI runs):
@@ -101,7 +120,9 @@ The eval harness lives in `eval/`; the Next.js two-screen UI lives in `web/`.
 ## Documentation
 
 - **[Requirements & success spec](docs/plans/provenance-requirements.md)** — the single source of truth.
-- **[Architecture](ARCHITECTURE.md)** — services, data ownership, the ingestion saga.
+- **[Architecture (overview)](ARCHITECTURE.md)** — services, data ownership, the ingestion saga.
+- **[Architecture (detailed)](docs/ARCHITECTURE.md)** — file-by-file / function-by-function reference,
+  the deployment model (compose overlays, models, GPU), and the end-to-end flows.
 - **[ADR-001](docs/adr/ADR-001-microservices-from-p0.md)** — why full microservices from P0.
 - **[Contributing](CONTRIBUTING.md)** · **[Security](SECURITY.md)** · **[Changelog](CHANGELOG.md)**
 
