@@ -21,6 +21,15 @@ class Embedder(Protocol):
     def embed(self, texts: list[str]) -> list[list[float]]: ...
 
 
+def _onnx_providers() -> list[str] | None:
+    """CUDA (with CPU fallback) when PROVENANCE_ONNX_CUDA is set — the GPU deployment ships an
+    onnxruntime-gpu build, so fastembed runs the model on CUDAExecutionProvider. Unset ⇒ None
+    ⇒ fastembed's default (CPU), keeping air-gapped/CI hosts unchanged."""
+    if os.environ.get("PROVENANCE_ONNX_CUDA", "").lower() in ("1", "true", "yes"):
+        return ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    return None
+
+
 class DeterministicEmbedder:
     """Hash-based pseudo-embeddings: stable, offline, dim-correct. Not semantic."""
 
@@ -51,7 +60,9 @@ class FastEmbedEmbedder:
     def __init__(self, model_name: str) -> None:
         from fastembed import TextEmbedding
 
-        self._model = TextEmbedding(model_name)
+        providers = _onnx_providers()
+        self._model = TextEmbedding(model_name, providers=providers) if providers \
+            else TextEmbedding(model_name)
         self.model_id = model_name
         self.dim = len(next(iter(self._model.embed(["probe"]))))
 

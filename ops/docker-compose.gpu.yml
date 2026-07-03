@@ -1,0 +1,38 @@
+# GPU overlay — run the ONNX models on the GPU (layer on top of the online overlay):
+#
+#   docker compose -f ops/docker-compose.yml \
+#                  -f ops/docker-compose.online.yml \
+#                  -f ops/docker-compose.gpu.yml up -d
+#
+# Grants GPU access to the services that host ONNX models and flips them onto CUDA:
+#   • model       — fastembed embeddings (bge-small)      → CUDAExecutionProvider
+#   • query-agent — fastembed cross-encoder reranker      → CUDAExecutionProvider
+#   • parse       — RapidOCR (onnxruntime) for scanned pages
+# The image ships onnxruntime-gpu (see Dockerfile); PROVENANCE_ONNX_CUDA makes the embedder/
+# reranker request CUDA (with CPU fallback). Docling's layout/table models are torch (not
+# ONNX) and the image carries CPU torch, so PARSE_USE_GPU is intentionally left off here.
+name: provenance
+
+x-gpu-deploy: &gpu-deploy
+  resources:
+    reservations:
+      devices:
+        - driver: nvidia
+          count: all
+          capabilities: [gpu]
+
+services:
+  model:
+    environment:
+      PROVENANCE_ONNX_CUDA: "1"
+    deploy: *gpu-deploy
+
+  query-agent:
+    environment:
+      PROVENANCE_ONNX_CUDA: "1"
+    deploy: *gpu-deploy
+
+  parse:
+    environment:
+      PROVENANCE_ONNX_CUDA: "1"
+    deploy: *gpu-deploy

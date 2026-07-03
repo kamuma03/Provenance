@@ -10,6 +10,8 @@ from __future__ import annotations
 import os
 from typing import Protocol
 
+from .embedder import _onnx_providers
+
 
 class Reranker(Protocol):
     model_id: str
@@ -37,7 +39,9 @@ class CrossEncoderReranker:
     def __init__(self, model_name: str) -> None:
         from fastembed.rerank.cross_encoder import TextCrossEncoder
 
-        self._model = TextCrossEncoder(model_name)
+        providers = _onnx_providers()
+        self._model = TextCrossEncoder(model_name, providers=providers) if providers \
+            else TextCrossEncoder(model_name)
         self.model_id = model_name
 
     def rerank(self, query: str, docs: list[str]) -> list[float]:

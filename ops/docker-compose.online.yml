@@ -1,0 +1,45 @@
+# Fully-online overlay — real models, as an end user runs it.
+#
+#   docker compose -f ops/docker-compose.yml -f ops/docker-compose.online.yml up -d
+#
+# Differences from the hermetic base compose:
+#   • PROVENANCE_OFFLINE unset  → real fastembed embeddings (bge-small) + real bge-reranker
+#     (models download on first use), and Docling/PaddleOCR on the real parse path.
+#   • LLM points at the HOST Ollama (already serving qwen3.6:27b / qwen3.5:9b) instead of the
+#     bundled compose Ollama — so we don't collide on :11434 or re-pull the tier models.
+#   • extra_hosts maps host.docker.internal → the host, so containers reach that Ollama.
+# The compose `ollama` / `ollama-pull` services stay down (they're profile-gated to `llm`).
+name: provenance
+
+x-online-env: &online-env
+  PROVENANCE_OFFLINE: ""                                   # real models, not the hash fallback
+  LLM_LOCAL_BASE_URL: http://host.docker.internal:11434/v1  # host Ollama (OpenAI-compatible)
+
+x-online-hosts: &online-hosts
+  - "host.docker.internal:host-gateway"
+
+services:
+  gateway:
+    environment: *online-env
+    extra_hosts: *online-hosts
+  ingestion:
+    environment: *online-env
+    extra_hosts: *online-hosts
+  parse:
+    environment: *online-env
+    extra_hosts: *online-hosts
+  extraction:
+    environment: *online-env
+    extra_hosts: *online-hosts
+  vector:
+    environment: *online-env
+    extra_hosts: *online-hosts
+  graph:
+    environment: *online-env
+    extra_hosts: *online-hosts
+  model:
+    environment: *online-env
+    extra_hosts: *online-hosts
+  query-agent:
+    environment: *online-env
+    extra_hosts: *online-hosts
