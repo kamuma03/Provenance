@@ -16,6 +16,7 @@ test_ingestion_e2e.py against a live model). This test runs in the default suite
 from __future__ import annotations
 
 import io
+import os
 import tempfile
 from pathlib import Path
 
@@ -166,3 +167,86 @@ async def test_pdf_to_vector_graph_and_ontology() -> None:
         assert name_to_id["Supply-chain disruption"] not in neighbors  # no edge was asserted
     finally:
         graph.close()
+
+
+@pytest.mark.asyncio
+async def test_real_embedder_ranks_revenue_chunk_by_semantics() -> None:
+    """Relevance, not just wiring: the real fastembed model must rank the revenue-bearing
+    chunk *first* among unrelated distractors, by cosine — something the hash fallback can't.
+
+    The hermetic test above proves the FAISS/BM25 plumbing and provenance with the offline
+    DeterministicEmbedder, but that embedder is SHA256-based and carries no semantic signal
+    (its scores are luck-of-the-hash). This variant runs the actual BAAI/bge-small-en-v1.5
+    model (downloaded on first use) and asserts genuine ranking quality, plus the contrast:
+    the deterministic fallback *fails* to surface the revenue chunk on the same corpus.
+
+    Opt-in: needs the model, so it is skipped when PROVENANCE_OFFLINE is set (the default
+    hermetic CI suite). Run it with PROVENANCE_OFFLINE unset to validate retrieval relevance.
+    """
+    if os.environ.get("PROVENANCE_OFFLINE"):
+        pytest.skip("real-embedder relevance needs a model download; offline suite is hash-based")
+    pytest.importorskip("fastembed")
+
+    from provenance_contracts import QueryHit, VectorRecord
+    from provenance_services.chunker import chunk_elements
+    from provenance_services.embedder import DeterministicEmbedder, Embedder, FastEmbedEmbedder
+    from provenance_services.faiss_store import FaissVectorStore
+    from provenance_services.parse_engine import parse_pdf_bytes
+
+    kb_id = "kb-acme-real"
+    doc_id = "doc-10k-2023"
+
+    parsed = parse_pdf_bytes(_financial_pdf())
+    chunks = chunk_elements(parsed.elements, document_id=doc_id, kb_id=kb_id)
+
+    # Real doc chunks (the table carries "Total Revenue") sat among clearly-unrelated noise,
+    # so ranking the right chunk first requires actual semantics, not substring luck.
+    distractors = [
+        "The recipe calls for two cups of flour, a pinch of salt, and softened butter.",
+        "Rainfall in the coastal region peaked sharply during the summer monsoon season.",
+        "The midfielder scored a spectacular goal in the final minute of the match.",
+        "Photosynthesis converts sunlight into chemical energy stored in glucose within plants.",
+    ]
+    corpus: list[tuple[str, str, dict[str, str]]] = [
+        (c.id, c.text, {"document_id": doc_id, "page": str(c.page)}) for c in chunks
+    ]
+    corpus += [(f"noise-{i}", t, {"document_id": "doc-noise"}) for i, t in enumerate(distractors)]
+
+    query = "What revenue did the company report?"
+
+    async def ranked(embedder: Embedder) -> list[QueryHit]:
+        vectors = embedder.embed([text for _id, text, _meta in corpus])
+        store = FaissVectorStore()
+        await store.upsert(
+            kb_id,
+            [
+                VectorRecord(chunk_id=cid, embedding=v, text=text, metadata=meta)
+                for (cid, text, meta), v in zip(corpus, vectors, strict=True)
+            ],
+        )
+        # dense-only path: pure cosine, so the score is semantic similarity (not RRF rank)
+        qvec = embedder.embed([query])[0]
+        hits: list[QueryHit] = await store.query(kb_id, qvec, k=len(corpus))
+        return hits
+
+    # ── real model: the revenue chunk wins outright, with a real cosine margin over noise ──
+    real_hits = await ranked(FastEmbedEmbedder("BAAI/bge-small-en-v1.5"))
+    top = real_hits[0]
+    assert "revenue" in top.text.lower(), (
+        f"real model top-1 was not the revenue chunk: {top.text[:60]!r}"
+    )
+    assert top.metadata["document_id"] == doc_id  # provenance survives on the winning hit
+    best_noise = max(
+        h.score for h in real_hits if h.metadata.get("document_id") == "doc-noise"
+    )
+    assert top.score > 0.55, f"revenue-chunk cosine unexpectedly low: {top.score:.3f}"
+    assert top.score - best_noise > 0.15, (
+        f"semantic margin too small: {top.score:.3f} vs best distractor {best_noise:.3f}"
+    )
+
+    # ── contrast: the deterministic (hash) fallback has no semantic signal on this corpus ──
+    # DeterministicEmbedder is pure SHA256 (no RNG), so this failure is reproducible.
+    hash_hits = await ranked(DeterministicEmbedder())
+    assert "revenue" not in hash_hits[0].text.lower(), (
+        "hash fallback unexpectedly ranked the revenue chunk first — the contrast is moot"
+    )
