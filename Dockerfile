@@ -41,13 +41,24 @@ COPY services ./services
 RUN uv pip install --system --break-system-packages \
         -e packages/contracts -e packages/service -e services
 
-# Swap the CPU onnxruntime (pulled transitively by fastembed / rapidocr) for the CUDA build.
-# The aarch64 + CUDA-13 wheel isn't on PyPI; it comes from NVIDIA's SBSA index. Same import
-# name (`onnxruntime`), so once installed every ONNX model can use CUDAExecutionProvider.
-RUN uv pip uninstall --system --break-system-packages onnxruntime \
-    && uv pip install --system --break-system-packages \
-        --extra-index-url https://pypi.jetson-ai-lab.io/sbsa/cu130 \
-        "onnxruntime-gpu==1.24.0"
+# Swap the CPU onnxruntime (pulled transitively by fastembed / rapidocr) for the CUDA build,
+# but ONLY on arm64: the CUDA-13 wheel is aarch64-only (NVIDIA's SBSA index, not on PyPI), so
+# attempting it on x86 would fail the build. On other arches (e.g. an x86 CI `docker build`)
+# the CPU onnxruntime is kept and every ONNX model runs on CPU — the image still builds. The
+# default auto-detects via TARGETARCH; force either way with --build-arg ONNXRUNTIME_GPU=1|0.
+ARG TARGETARCH
+ARG ONNXRUNTIME_GPU=auto
+RUN set -eu; \
+    want="$ONNXRUNTIME_GPU"; \
+    if [ "$want" = auto ]; then { [ "$TARGETARCH" = arm64 ] && want=1 || want=0; }; fi; \
+    if [ "$want" = 1 ]; then \
+        echo "onnxruntime-gpu: installing CUDA build (arch=$TARGETARCH)"; \
+        uv pip uninstall --system --break-system-packages onnxruntime; \
+        uv pip install --system --break-system-packages \
+            --extra-index-url https://pypi.jetson-ai-lab.io/sbsa/cu130 "onnxruntime-gpu==1.24.0"; \
+    else \
+        echo "onnxruntime-gpu: skipped, keeping CPU onnxruntime (arch=$TARGETARCH, arg=$ONNXRUNTIME_GPU)"; \
+    fi
 
 # Bake the exported reranker; provenance_services.reranker loads it from here on CUDA when
 # RERANKER_MODEL=BAAI/bge-reranker-v2-m3 (the basename maps to <RERANKER_ONNX_ROOT>/<name>).
