@@ -20,11 +20,16 @@ SERVICE_URLS: dict[str, str] = {
     "query": os.environ.get("QUERY_URL", "http://query-agent:8000"),
 }
 
+# Inter-service calls fan out to LLM-bearing endpoints (detect/extract, and the agentic
+# /answer path: planner + critic + synthesizer). Cold model loads and multi-step generation
+# legitimately exceed the default HTTP timeout, so it's configurable and defaults high.
+_CALL_TIMEOUT_S = float(os.environ.get("SERVICE_CALL_TIMEOUT_S", "180"))
+
 
 async def call(service: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     """POST to another service and return its JSON. Raises on transport/HTTP error."""
     base = SERVICE_URLS[service]
-    async with traced_client() as client:
+    async with traced_client(_CALL_TIMEOUT_S) as client:
         resp = await client.post(f"{base}{path}", json=payload or {})
         resp.raise_for_status()
         return cast("dict[str, Any]", resp.json())
@@ -33,7 +38,7 @@ async def call(service: str, path: str, payload: dict[str, Any] | None = None) -
 async def call_get(service: str, path: str) -> dict[str, Any]:
     """GET from another service and return its JSON."""
     base = SERVICE_URLS[service]
-    async with traced_client() as client:
+    async with traced_client(_CALL_TIMEOUT_S) as client:
         resp = await client.get(f"{base}{path}")
         resp.raise_for_status()
         return cast("dict[str, Any]", resp.json())

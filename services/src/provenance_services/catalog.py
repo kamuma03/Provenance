@@ -28,9 +28,17 @@ class Catalog:
         self._pool: asyncpg.Pool | None = None
 
     async def connect(self) -> None:
+        await self._ensure()
+
+    async def _ensure(self) -> None:
+        """(Re)establish the pool on demand. Startup may race Postgres readiness (the gateway
+        can boot first), so instead of failing permanently we lazily reconnect on the next
+        call once the DB is up — the skeleton still degrades gracefully if it never is (N6)."""
+        if self._pool is not None:
+            return
         try:
             self._pool = await asyncpg.create_pool(_dsn(), min_size=1, max_size=5)
-        except Exception:  # pragma: no cover - degrade if DB not yet ready (N6)
+        except Exception:  # pragma: no cover - DB not ready yet; retry on the next call
             self._pool = None
 
     async def close(self) -> None:
@@ -38,6 +46,7 @@ class Catalog:
             await self._pool.close()
 
     async def ready(self) -> bool:
+        await self._ensure()
         if self._pool is None:
             return False
         try:
@@ -48,6 +57,7 @@ class Catalog:
             return False
 
     async def create_kb(self, kb_id: str, name: str, domain_id: str) -> None:
+        await self._ensure()
         if self._pool is None:
             return
         async with self._pool.acquire() as conn:
@@ -60,6 +70,7 @@ class Catalog:
     async def create_document(
         self, doc_id: str, kb_id: str, source: str, content_type: str, content_hash: str
     ) -> None:
+        await self._ensure()
         if self._pool is None:
             return
         async with self._pool.acquire() as conn:
@@ -71,12 +82,14 @@ class Catalog:
             )
 
     async def update_status(self, doc_id: str, status: str) -> None:
+        await self._ensure()
         if self._pool is None:
             return
         async with self._pool.acquire() as conn:
             await conn.execute("UPDATE document SET status = $2 WHERE id = $1", doc_id, status)
 
     async def get_document(self, doc_id: str) -> dict[str, str] | None:
+        await self._ensure()
         if self._pool is None:
             return None
         async with self._pool.acquire() as conn:

@@ -59,6 +59,24 @@ app = create_app(
     on_startup=_on_startup, on_shutdown=_on_shutdown,
 )
 
+# The Gateway is the browser-facing edge (R51); the Next.js UI fetches it cross-origin, so
+# it needs CORS (the internal services don't). Origins are configurable; default to the
+# local dev UI. No credentials are used, so "*" is a valid wildcard if set.
+import os  # noqa: E402
+
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+
+_cors_origins = [
+    o.strip() for o in os.environ.get("CORS_ALLOW_ORIGINS", "http://localhost:3000").split(",")
+    if o.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 @app.post("/kb", tags=["gateway"])
 async def create_kb(req: Request) -> dict[str, str]:

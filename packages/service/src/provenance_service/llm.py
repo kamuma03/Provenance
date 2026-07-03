@@ -81,15 +81,22 @@ class OpenAICompatLLMClient:
         import httpx
 
         headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
-        payload = {
+        payload: dict[str, object] = {
             "model": self.model_id,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
             ],
-            "max_tokens": 1024,
+            "max_tokens": int(os.environ.get("LLM_MAX_TOKENS", "2048")),
             "temperature": 0,
         }
+        # Reasoning ("thinking") models otherwise spend the whole token budget in a hidden
+        # reasoning trace and return empty content (finish_reason=length). reasoning_effort is
+        # the OpenAI-standard control; Ollama/vLLM/SGLang honor it. "none" ⇒ direct answer,
+        # which is what the extraction/detection/planner/synth tasks want. Configurable.
+        effort = os.environ.get("LLM_REASONING_EFFORT", "none").strip()
+        if effort:
+            payload["reasoning_effort"] = effort
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
                 f"{self.base_url}/chat/completions", json=payload, headers=headers
