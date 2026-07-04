@@ -47,12 +47,12 @@ def test_new_upload_publishes_and_returns_202(monkeypatch: pytest.MonkeyPatch) -
         published.append(subject)
 
     monkeypatch.setattr(gateway.catalog, "create_document", fake_create)
-    monkeypatch.setattr(gateway.bus, "publish", fake_publish)
+    monkeypatch.setattr(gateway.bus, "publish_durable", fake_publish)
 
     r = client.post("/kb/kb1/documents", json={"content": "hello world"})
     assert r.status_code == 202
     assert r.json()["status"] == "queued"
-    assert published == ["ingest.jobs"]  # saga enqueued exactly once
+    assert published == ["ingest.jobs"]  # saga enqueued exactly once (durable publish)
 
 
 @pytest.mark.asyncio

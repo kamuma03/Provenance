@@ -84,6 +84,20 @@ class PgVectorStore:
     ) -> list[QueryHit]:
         return await self.query(namespace, vector, k, filter)  # dense for v1
 
+    async def delete(self, namespace: str, document_id: str) -> int:
+        """Delete a document's rows in place (R54, review H-3)."""
+        pool = await self._get_pool()
+        try:
+            async with pool.acquire() as conn:
+                status = await conn.execute(
+                    "DELETE FROM prov_vectors WHERE kb_id = $1 "
+                    "AND metadata->>'document_id' = $2",
+                    namespace, document_id,
+                )
+        except asyncpg.UndefinedTableError:  # nothing was ever upserted
+            return 0
+        return int(status.split()[-1]) if status else 0
+
     async def close(self) -> None:
         if self._pool is not None:
             await self._pool.close()

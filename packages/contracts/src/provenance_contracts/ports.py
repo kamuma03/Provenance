@@ -50,3 +50,8 @@ class VectorStorePort(Protocol):
         k: int,
         filter: dict[str, str] | None = None,
     ) -> list[QueryHit]: ...
+
+    async def delete(self, namespace: str, document_id: str) -> int:
+        """Delete all records for a document; returns the count removed. Enables saga
+        compensation to roll back a partial ingest (R54)."""
+        ...

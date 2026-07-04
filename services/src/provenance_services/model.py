@@ -5,6 +5,7 @@ P1: real embeddings via fastembed (deterministic fallback offline). Reranker lan
 
 from __future__ import annotations
 
+import anyio
 from fastapi import Request
 from provenance_service import create_app, tracer
 
@@ -21,7 +22,9 @@ async def embed(req: Request) -> dict[str, object]:
     body = await req.json()
     texts = body.get("texts", [])
     with tracer("model").start_as_current_span("model.embed") as span:
-        vectors = _embedder.embed(texts) if texts else []
+        # ONNX embed of a whole document is CPU-bound (seconds); run it off the event loop so
+        # /health and /ready keep answering under load (N7, review H-5).
+        vectors = await anyio.to_thread.run_sync(_embedder.embed, texts) if texts else []
         span.set_attribute("model.embedded", len(vectors))
         return {"model_id": _embedder.model_id, "dim": _embedder.dim, "embeddings": vectors}
 
@@ -33,7 +36,8 @@ async def rerank(req: Request) -> dict[str, object]:
     query = body.get("query", "")
     documents = body.get("documents", [])
     with tracer("model").start_as_current_span("model.rerank") as span:
-        scores = _reranker.rerank(query, [d.get("text", "") for d in documents])
+        texts = [d.get("text", "") for d in documents]
+        scores = await anyio.to_thread.run_sync(_reranker.rerank, query, texts)
         ranked = sorted(
             ({"id": d["id"], "score": s} for d, s in zip(documents, scores, strict=False)),
             key=lambda x: x["score"],

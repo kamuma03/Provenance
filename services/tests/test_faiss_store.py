@@ -30,6 +30,29 @@ async def test_upsert_then_query_returns_nearest() -> None:
 
 
 @pytest.mark.asyncio
+async def test_delete_removes_only_the_named_document() -> None:
+    # Saga compensation deletes one document's vectors while leaving the rest queryable (H-3).
+    emb = DeterministicEmbedder(dim=64)
+    store = FaissVectorStore()
+    await store.upsert("kb1", [
+        VectorRecord(chunk_id="d1_c1", embedding=emb.embed(["apple revenue"])[0],
+                     text="apple revenue", metadata={"document_id": "d1"}),
+        VectorRecord(chunk_id="d1_c2", embedding=emb.embed(["apple pie"])[0],
+                     text="apple pie", metadata={"document_id": "d1"}),
+        VectorRecord(chunk_id="d2_c1", embedding=emb.embed(["banana bread"])[0],
+                     text="banana bread", metadata={"document_id": "d2"}),
+    ])
+
+    removed = await store.delete("kb1", "d1")
+    assert removed == 2
+
+    hits = await store.query("kb1", emb.embed(["apple revenue"])[0], k=5)
+    ids = {h.chunk_id for h in hits}
+    assert ids == {"d2_c1"}  # d1's vectors are gone; d2 survives
+    assert await store.delete("kb1", "d1") == 0  # idempotent second compensation
+
+
+@pytest.mark.asyncio
 async def test_namespace_isolation() -> None:
     emb = DeterministicEmbedder(dim=32)
     store = FaissVectorStore()

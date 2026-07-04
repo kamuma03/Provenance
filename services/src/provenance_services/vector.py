@@ -44,6 +44,18 @@ async def upsert(req: Request) -> dict[str, object]:
         return {"ok": True, "upserted": len(records)}
 
 
+@app.post("/delete", tags=["vector"])
+async def delete(req: Request) -> dict[str, object]:
+    """Delete a document's records (saga compensation, R54/H-3)."""
+    body = await req.json()
+    namespace = body.get("namespace", "default")
+    document_id = body.get("document_id", "")
+    with tracer("vector").start_as_current_span("vector.delete") as span:
+        removed = await _store.delete(namespace, document_id) if document_id else 0
+        span.set_attribute("vector.deleted", removed)
+        return {"deleted": removed}
+
+
 @app.post("/query", tags=["vector"])
 async def query(req: Request) -> dict[str, object]:
     """Dense by default; hybrid (dense + BM25) when `text` is provided (R24)."""

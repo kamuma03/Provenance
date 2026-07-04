@@ -30,6 +30,7 @@ bus = NatsBus(settings.nats_url)
 
 INGEST_SUBJECT = "ingest.jobs"
 STATUS_SUBJECT = "ingest.status"
+INGEST_STREAM = "INGEST"
 
 # Domain detection needs only a sample; extraction must cover the WHOLE document, batched
 # into windows through the cheap LLM tier so entities/relations past page ~2 reach the graph
@@ -53,8 +54,22 @@ def _windows(chunks: list[Chunk], size: int) -> Iterator[str]:
 
 
 def _compensate(service: str):  # type: ignore[no-untyped-def]
+    """Real rollback (R54, review H-3): call the owning service's delete-by-document endpoint
+    so a failed saga leaves no orphaned vectors/entities. Best-effort — a compensation error
+    is logged, never raised, so the saga still reaches a terminal `failed`."""
     async def comp(ctx: Ctx) -> None:
-        log.warning("compensating %s for document_id=%s", service, ctx.get("document_id"))
+        doc_id = str(ctx.get("document_id"))
+        try:
+            if service == "graph":
+                await call("graph", "/delete", {"document_id": doc_id})
+            elif service == "vector":
+                await call(
+                    "vector", "/delete",
+                    {"namespace": ctx.get("kb_id"), "document_id": doc_id},
+                )
+            log.info("compensated %s for document_id=%s", service, doc_id)
+        except Exception as exc:  # noqa: BLE001 - rollback is best-effort
+            log.warning("compensation for %s failed for %s: %s", service, doc_id, exc)
 
     return comp
 
@@ -205,8 +220,11 @@ async def _run_saga(data: bytes, _headers: dict[str, str]) -> None:
 
 async def _on_startup() -> None:
     await bus.connect()
-    await bus.subscribe(INGEST_SUBJECT, _run_saga, queue="ingestion")
-    log.info("subscribed to %s", INGEST_SUBJECT)
+    # Durable consumer: ack only after the saga finishes, so an ingestion crash mid-saga
+    # redelivers the job instead of stranding the document at queued/parsing (H-3).
+    await bus.ensure_stream(INGEST_STREAM, [INGEST_SUBJECT])
+    await bus.subscribe_durable(INGEST_SUBJECT, _run_saga, durable="ingestion", queue="ingestion")
+    log.info("subscribed (durable) to %s", INGEST_SUBJECT)
 
 
 async def _on_shutdown() -> None:

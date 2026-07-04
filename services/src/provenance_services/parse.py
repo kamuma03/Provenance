@@ -15,6 +15,7 @@ import base64
 import os
 from typing import cast
 
+import anyio
 from fastapi import Request
 from provenance_contracts import ParseResult
 from provenance_service import create_app, tracer
@@ -46,7 +47,9 @@ async def parse(req: Request) -> dict[str, object]:
         if not content_b64:
             # No payload (e.g. P0-style ping): return an empty, well-formed result.
             return {"elements": [], "pages": 0, "parse_method": "text_layer", "engine": "none"}
-        result = parse_document(base64.b64decode(content_b64))
+        # A full Docling/OCR parse is seconds-to-minutes of CPU; keep it off the event loop
+        # so liveness probes answer and one scanned doc can't stall the service (review H-5).
+        result = await anyio.to_thread.run_sync(parse_document, base64.b64decode(content_b64))
         span.set_attribute("parse.elements", len(result.elements))
         span.set_attribute("parse.engine", result.engine)
         return cast("dict[str, object]", result.model_dump())

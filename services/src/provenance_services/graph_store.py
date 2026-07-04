@@ -93,6 +93,23 @@ class GraphStore:
             out.append(cast("list[Any]", res.get_next())[0])
         return out
 
+    def delete_document(self, document_id: str) -> int:
+        """Delete the relations this document authored (saga compensation, R54/review H-3).
+
+        Only relations carry document_id; entities are resolved/merged and may be shared
+        across documents, so they are intentionally left intact — removing them could erase
+        another document's provenance."""
+        res = self._query(
+            "MATCH ()-[r:Rel]->() WHERE r.document_id = $doc RETURN count(r)",
+            {"doc": document_id},
+        )
+        count = int(cast("list[Any]", res.get_next())[0]) if res.has_next() else 0
+        if count:
+            self._conn.execute(
+                "MATCH ()-[r:Rel]->() WHERE r.document_id = $doc DELETE r", {"doc": document_id}
+            )
+        return count
+
     def close(self) -> None:
         self._conn.close()
         self._db.close()

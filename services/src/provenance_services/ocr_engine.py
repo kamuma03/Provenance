@@ -7,6 +7,7 @@ are rendered with pypdfium2. (Docling + full PaddleOCR remain the richer Spark o
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 from provenance_contracts import BBox
@@ -52,10 +53,14 @@ class OcrEngine:
 
 
 _ENGINE: OcrEngine | None = None
+_ENGINE_LOCK = threading.Lock()
 
 
 def get_ocr() -> OcrEngine:
+    # Parses run on a thread pool (H-5), so guard the lazy singleton against a construction
+    # race that could build two RapidOCR sessions concurrently.
     global _ENGINE
-    if _ENGINE is None:
-        _ENGINE = OcrEngine()
-    return _ENGINE
+    with _ENGINE_LOCK:
+        if _ENGINE is None:
+            _ENGINE = OcrEngine()
+        return _ENGINE

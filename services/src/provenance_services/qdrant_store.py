@@ -80,3 +80,14 @@ class QdrantVectorStore:
         filter: dict[str, str] | None = None,
     ) -> list[QueryHit]:
         return await self.query(namespace, vector, k, filter)  # dense for v1
+
+    async def delete(self, namespace: str, document_id: str) -> int:
+        """Delete a document's points by payload filter (R54, review H-3)."""
+        if not self._client.collection_exists(namespace):
+            return 0
+        flt = models.Filter(must=[
+            models.FieldCondition(key="document_id", match=models.MatchValue(value=document_id))
+        ])
+        count = self._client.count(namespace, count_filter=flt, exact=True).count
+        self._client.delete(namespace, points_selector=models.FilterSelector(filter=flt))
+        return int(count)

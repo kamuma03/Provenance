@@ -27,6 +27,9 @@ class _StubStore:
     ) -> list[QueryHit]:
         raise NotImplementedError(f"{self.backend} adapter not implemented yet")
 
+    async def delete(self, namespace: str, document_id: str) -> int:
+        raise NotImplementedError(f"{self.backend} adapter not implemented yet")
+
 
 class OpenSearchVectorStore(_StubStore):
     backend = "opensearch"

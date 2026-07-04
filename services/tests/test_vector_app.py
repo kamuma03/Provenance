@@ -30,3 +30,17 @@ def test_same_model_and_other_namespaces_are_unaffected() -> None:
     assert _upsert("ns_b", "bge-small") == 200
     assert _upsert("ns_b", "bge-small") == 200  # same model re-upsert is fine
     assert _upsert("ns_c", "hash-fallback") == 200  # a different namespace is independent
+
+
+def test_delete_endpoint_removes_a_documents_records() -> None:
+    # The compensation endpoint (H-3): upsert two docs, delete one, confirm the count.
+    recs = [
+        {"chunk_id": "d1_c1", "embedding": [0.1, 0.2, 0.3], "text": "a",
+         "metadata": {"document_id": "d1"}},
+        {"chunk_id": "d2_c1", "embedding": [0.4, 0.5, 0.6], "text": "b",
+         "metadata": {"document_id": "d2"}},
+    ]
+    assert client.post("/upsert", json={"namespace": "ns_del", "records": recs}).status_code == 200
+    r = client.post("/delete", json={"namespace": "ns_del", "document_id": "d1"})
+    assert r.status_code == 200
+    assert r.json()["deleted"] == 1

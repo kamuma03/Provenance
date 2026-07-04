@@ -40,6 +40,27 @@ def test_merge_is_idempotent(tmp_path: Path) -> None:
         gs.close()
 
 
+def test_delete_document_removes_its_relations_but_keeps_shared_entities(tmp_path: Path) -> None:
+    # Saga compensation for a failed graph write: drop the document's relations, leave the
+    # resolved (possibly shared) entities intact (R54, review H-3).
+    gs = GraphStore(str(tmp_path / "g4"))
+    try:
+        gs.upsert_entities([
+            _ent("e_apple", "kb1", "Company", "Apple"),
+            _ent("e_ey", "kb1", "Auditor", "EY"),
+        ])
+        gs.write_relation("e_apple", "AUDITED_BY", "e_ey", kb_id="kb1", document_id="d1")
+        gs.write_relation("e_apple", "MENTIONS", "e_ey", kb_id="kb1", document_id="d2")
+
+        removed = gs.delete_document("d1")
+        assert removed == 1
+        assert gs.neighbors("e_apple") == ["e_ey"]  # d2's relation still links them
+        assert gs.entity_count("kb1") == 2  # entities are not deleted
+        assert gs.delete_document("d1") == 0  # idempotent
+    finally:
+        gs.close()
+
+
 def test_kb_partitioning_isolates_subgraphs(tmp_path: Path) -> None:
     gs = GraphStore(str(tmp_path / "g3"))
     try:

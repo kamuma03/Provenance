@@ -32,6 +32,7 @@ catalog = Catalog()
 
 INGEST_SUBJECT = "ingest.jobs"
 STATUS_SUBJECT = "ingest.status"
+INGEST_STREAM = "INGEST"
 
 
 async def _on_status(data: bytes, _headers: dict[str, str]) -> None:
@@ -49,6 +50,8 @@ async def _on_status(data: bytes, _headers: dict[str, str]) -> None:
 async def _on_startup() -> None:
     await bus.connect()
     await catalog.connect()
+    # Durable stream for ingest jobs so a queued document survives an ingestion restart (H-3).
+    await bus.ensure_stream(INGEST_STREAM, [INGEST_SUBJECT])
     await bus.subscribe(STATUS_SUBJECT, _on_status, queue="gateway")
 
 
@@ -123,7 +126,7 @@ async def upload_document(kb_id: str, req: Request) -> JSONResponse:
         job = json.dumps(
             {"document_id": doc_id, "kb_id": kb_id, "content_b64": content_b64, "source": source}
         ).encode()
-        await bus.publish(INGEST_SUBJECT, job)
+        await bus.publish_durable(INGEST_SUBJECT, job)  # persisted job (H-3)
     return JSONResponse(status_code=202, content={"document_id": doc_id, "status": "queued"})
 
 
