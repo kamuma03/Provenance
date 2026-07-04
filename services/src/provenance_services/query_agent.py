@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import cast
 
 from fastapi import Request
-from provenance_contracts import EvidenceSet, QueryHit
+from provenance_contracts import EvidenceSet, QueryHit, ScoredChunk
 from provenance_service import create_app, tracer
 
 from .clients import call
@@ -78,11 +78,38 @@ async def answer(req: Request) -> dict[str, object]:
     kb_id = body.get("kb_id", "default")
     query = body.get("query", "")
 
+    # Capture the evidence the crew actually retrieves so the caller doesn't retrieve a second
+    # time, and so the returned evidence matches the answer's citations (R36, review M-15).
+    collected: list[EvidenceSet] = []
+
     async def _retrieve(kb: str, subquery: str) -> EvidenceSet:
-        return await retrieve(kb, subquery, _deps())
+        ev = await retrieve(kb, subquery, _deps())
+        collected.append(ev)
+        return ev
 
     with tracer("query-agent").start_as_current_span("query.answer") as span:
         ans = await run_crew(query, kb_id, _retrieve)
+        seen: set[str] = set()
+        chunks: list[ScoredChunk] = []
+        entity_ids: list[str] = []
+        graph_expanded = False
+        for ev in collected:
+            graph_expanded = graph_expanded or ev.graph_expanded
+            for c in ev.chunks:
+                if c.chunk_id not in seen:
+                    seen.add(c.chunk_id)
+                    chunks.append(c)
+            for e in ev.entity_ids:
+                if e not in entity_ids:
+                    entity_ids.append(e)
+        evidence = EvidenceSet(
+            subquery=query, chunks=chunks,
+            entity_ids=entity_ids, graph_expanded=graph_expanded,
+        )
         span.set_attribute("answer.refused", ans.refused)
         span.set_attribute("answer.claims", len(ans.claims))
-        return {"query": query, "answer": ans.model_dump()}
+        return {
+            "query": query,
+            "answer": ans.model_dump(),
+            "evidence": evidence.model_dump(),
+        }

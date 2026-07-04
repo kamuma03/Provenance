@@ -57,6 +57,29 @@ class FaissVectorStore:
         ns.texts.extend(r.text for r in records)
         ns._dirty = True
 
+    async def delete(self, namespace: str, document_id: str) -> int:
+        """Remove a document's records by rebuilding the namespace without them.
+
+        IndexFlatIP has no per-vector delete, so we reconstruct the surviving vectors into a
+        fresh index — correct and fine for the in-memory scale; a server backend (Qdrant/
+        pgvector) deletes in place (R54, review H-3)."""
+        ns = self._ns.get(namespace)
+        if ns is None or ns.index.ntotal == 0:
+            return 0
+        keep = [i for i, m in enumerate(ns.meta) if m.get("document_id") != document_id]
+        removed = len(ns.ids) - len(keep)
+        if removed == 0:
+            return 0
+        rebuilt = _Namespace(ns.dim)
+        if keep:
+            all_vecs = ns.index.reconstruct_n(0, ns.index.ntotal)  # vectors are already L2-normed
+            rebuilt.index.add(np.array([all_vecs[i] for i in keep], dtype="float32"))
+            rebuilt.ids = [ns.ids[i] for i in keep]
+            rebuilt.meta = [ns.meta[i] for i in keep]
+            rebuilt.texts = [ns.texts[i] for i in keep]
+        self._ns[namespace] = rebuilt
+        return removed
+
     def _passes(self, meta: dict[str, str], filter: dict[str, str] | None) -> bool:
         return not filter or all(meta.get(fk) == fv for fk, fv in filter.items())
 

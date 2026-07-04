@@ -43,21 +43,30 @@ A microservices system (8 services) with **database-per-service**, an async saga
 
 ```
 Next.js UI ──SSE──► Gateway/BFF ──┬─ async (NATS) ─► Ingestion ─► Parse · Extraction · Graph · Model · Vector
-                                  └─ sync (gRPC) ───► Query/Agent ─► Vector · Graph · Model
+                                  └─ sync (HTTP/JSON) ─► Query/Agent ─► Vector · Graph · Model
 ```
+
+Internal transport is **HTTP/JSON with shared Pydantic contracts** (single source of truth, N9);
+gRPC is deferred. See [ADR-001](docs/adr/ADR-001-microservices-from-p0.md).
 
 | Concern | Choice (open-source, permissive) |
 |---|---|
 | Catalog (metadata + provenance) | PostgreSQL |
 | Vector store | FAISS · Qdrant · pgvector (behind one `VectorStorePort`) |
 | Knowledge graph | Kuzu (MIT) |
-| Message queue | NATS JetStream |
-| OCR / parsing | Docling + PaddleOCR |
-| Retrieval | LlamaIndex (hybrid + rerank + graph expansion) |
-| Agents | AutoGen (Planner / Retriever / Critic / Synthesizer) |
-| Eval | RAGAS + hallucination + domain-detection accuracy, as a CI gate |
+| Message queue | NATS (core pub/sub; JetStream durability deferred) |
+| OCR / parsing | Docling + PaddleOCR · pdfplumber + RapidOCR (air-gapped path) |
+| Retrieval | hand-rolled hybrid (FAISS + BM25 RRF) + cross-encoder rerank + additive graph expansion |
+| Agents | hand-rolled 4-agent crew (Planner / Retriever / Critic / Synthesizer) |
+| Eval | offline CI gate: numeric exactness · groundedness · detection accuracy · honest-refusal (RAGAS faithfulness deferred, LLM-judged on the Spark) |
 | Embeddings + reranker | fastembed ONNX (`bge-small` + `bge-reranker-v2-m3`) on GPU via onnxruntime-gpu |
 | LLM | local tiers (Ollama `qwen`, OpenAI-compatible) with Claude as an A/B + eval judge |
+
+> **Implemented vs. deferred.** The services, saga ingestion, hybrid retrieval, agent crew,
+> tracing, license gate, and eval gate are real. Deferred (not yet in the code): gRPC transport,
+> NATS JetStream durability + saga compensation, RAGAS LLM-judged metrics. The stack table names
+> the libraries actually in `uv.lock`; it does not claim LlamaIndex/AutoGen/RAGAS (those are
+> hand-rolled or deferred).
 
 Every datastore is permissively licensed (Apache 2.0 / MIT / BSD / PostgreSQL) — a CI license-audit fails the build on any SSPL/BSL/GPL component, keeping the on-prem claim legal-clean.
 

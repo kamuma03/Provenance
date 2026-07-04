@@ -43,6 +43,9 @@ async def benchmark_adapter(
     await store.upsert("bench", records)
     ingest_ms = (time.perf_counter() - t0) * 1000
 
+    if not queries:  # an empty query set must not crash on median([]) / divide-by-zero (L-12)
+        return BenchResult(backend, len(corpus), round(ingest_ms, 1), 0.0, 0.0, 0.0)
+
     latencies: list[float] = []
     hits = 0
     for qtext, gold in queries:
@@ -54,12 +57,13 @@ async def benchmark_adapter(
             hits += 1
 
     latencies.sort()
+    p95_idx = min(int(len(latencies) * 0.95), len(latencies) - 1)  # clamp (was out-of-range risk)
     return BenchResult(
         backend=backend,
         n_docs=len(corpus),
         ingest_ms=round(ingest_ms, 1),
         p50_ms=round(statistics.median(latencies), 2),
-        p95_ms=round(latencies[int(len(latencies) * 0.95)], 2),
+        p95_ms=round(latencies[p95_idx], 2),
         recall_at_k=round(hits / len(queries), 3),
     )
 

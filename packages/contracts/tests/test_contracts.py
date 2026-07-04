@@ -107,6 +107,9 @@ def test_vector_store_port_is_structural() -> None:
         async def hybrid_query(self, namespace, vector, text, k, filter=None) -> list[QueryHit]:
             return []
 
+        async def delete(self, namespace: str, document_id: str) -> int:
+            return 0
+
     assert isinstance(StubVectorStore(), VectorStorePort)
     assert not isinstance(object(), VectorStorePort)
 

@@ -21,9 +21,14 @@ and **chat** (agentic, cited, multi-hop).
 
 ## Status & where to start
 
-Greenfield; documentation only. Implementation begins with the **P0 walking skeleton**
-(8 service shells + NATS + Postgres + one end-to-end OpenTelemetry trace, `docker compose
-up`), then P1 ingestion → P2 retrieval → P3 agents → P4 eval gate → P5 UI → P6 adapters/AWS.
+The walking skeleton and the P1–P5 slices are **implemented**: 8 services, saga-orchestrated
+ingestion, layout-aware parse (Docling / pdfplumber + OCR), domain detection + extraction,
+Kuzu graph, hybrid retrieval + rerank + additive graph lift, the 4-agent crew, the Next.js UI,
+end-to-end OpenTelemetry tracing, a CI license-audit, and an offline eval gate. **Deferred**
+(documented, not yet coded): gRPC transport (currently HTTP/JSON with shared Pydantic contracts),
+NATS JetStream durability + real saga compensation, RAGAS LLM-judged metrics, and the P6
+AWS adapters. See [`docs/plans/remediation-plan.md`](docs/plans/remediation-plan.md) for the
+open review findings and their sequencing.
 
 ## Invariants — do not violate
 
@@ -37,8 +42,9 @@ up`), then P1 ingestion → P2 retrieval → P3 agents → P4 eval gate → P5 U
 5. **Bounded loops** (R32) — the Planner→Critic loop has a hard `MAX_ITERATIONS`.
 6. **Provenance + tracing** (R56) — propagate W3C trace context; record how each fact was
    extracted (domain, confidence, schema version, parse method).
-7. **Generated contracts** (R57, N9) — gRPC internal, REST/OpenAPI at the edge; never
-   hand-copy cross-service types.
+7. **Shared contracts** (R57, N9) — one source of truth for cross-service types; never
+   hand-copy them. Internal transport is HTTP/JSON with shared Pydantic contracts today;
+   gRPC (R57) is deferred.
 8. **Two non-splits** (ADR-001) — keep the agent crew in one service; keep entity
    resolution in Graph.
 

@@ -10,7 +10,17 @@ import os
 
 from provenance_contracts import VectorStorePort
 
-from .catalog import _dsn
+
+def _pgvector_dsn() -> str:
+    """The Vector service owns its own database (R52) — it must NOT reuse the Gateway
+    catalog's DSN. Require a dedicated PGVECTOR_DSN with no catalog fallback (review H-10)."""
+    dsn = os.environ.get("PGVECTOR_DSN")
+    if not dsn:
+        raise RuntimeError(
+            "VECTOR_BACKEND=pgvector requires PGVECTOR_DSN (its own database, per R52); "
+            "it must not share the Gateway catalog's connection string."
+        )
+    return dsn
 
 
 def get_vector_store(backend: str | None = None) -> VectorStorePort:
@@ -22,8 +32,9 @@ def get_vector_store(backend: str | None = None) -> VectorStorePort:
         from .qdrant_store import QdrantVectorStore
         return QdrantVectorStore(os.environ.get("QDRANT_URL"))
     if backend == "pgvector":
+        dsn = _pgvector_dsn()  # validate first (R52), independent of driver availability
         from .pgvector_store import PgVectorStore
-        return PgVectorStore(_dsn())
+        return PgVectorStore(dsn)
     if backend == "opensearch":
         from .vendor_stubs import OpenSearchVectorStore
         return OpenSearchVectorStore()

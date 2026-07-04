@@ -8,10 +8,14 @@ degrades gracefully — no linked entities ⇒ vector evidence stands, never gra
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from opentelemetry import trace
 from provenance_contracts import BBox, EvidenceSet, QueryHit, ScoredChunk
+
+log = logging.getLogger("retrieval")
 
 EmbedFn = Callable[[str], Awaitable[list[float]]]
 HybridFn = Callable[[str, list[float], str, int], Awaitable[list[QueryHit]]]
@@ -38,14 +42,29 @@ def _to_chunk(h: QueryHit) -> ScoredChunk:
 
 async def retrieve(kb_id: str, query: str, deps: RetrievalDeps, k: int = 5) -> EvidenceSet:
     """Resolve a query to an EvidenceSet (R30). Vector floor + additive graph lift (R25)."""
+    span = trace.get_current_span()
     vector = await deps.embed(query)
     hits = await deps.hybrid(kb_id, vector, query, k * 3) if vector else []
-    reranked = await deps.rerank(query, hits) if hits else []
+
+    # Rerank is a refinement, not the floor: a Model-service hiccup must not throw away good
+    # hybrid hits — fall back to the hybrid fusion order (R25, review H-6).
+    try:
+        reranked = await deps.rerank(query, hits) if hits else []
+    except Exception as exc:
+        log.warning("rerank failed; keeping hybrid order: %s", exc)
+        span.set_attribute("retrieval.rerank_failed", True)
+        reranked = hits
     top = reranked[:k]
 
-    # Additive graph lift; empty-expansion ladder governs the entity side (R27).
-    linked = await deps.link(kb_id, query)
-    expanded = await deps.expand(linked) if linked else []
+    # Additive graph lift; empty-expansion ladder governs the entity side (R27). A Graph-
+    # service outage degrades to vector-only evidence — never fails the whole query (R25/H-6).
+    try:
+        linked = await deps.link(kb_id, query)
+        expanded = await deps.expand(linked) if linked else []
+    except Exception as exc:
+        log.warning("graph lift failed; vector floor stands: %s", exc)
+        span.set_attribute("retrieval.graph_failed", True)
+        linked, expanded = [], []
     entity_ids = list(dict.fromkeys([*linked, *expanded]))
 
     return EvidenceSet(

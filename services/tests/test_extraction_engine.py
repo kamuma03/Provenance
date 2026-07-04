@@ -19,6 +19,16 @@ def test_heuristic_generic_extracts_proper_nouns() -> None:
     assert any(e.type == "Organization" for e in ents)  # Inc suffix => Organization
 
 
+def test_heuristic_generic_strips_sentence_initial_determiners() -> None:
+    # "The"/"This" at a sentence start must not become an entity, nor glue onto the real name
+    # ("The Federal Reserve" → "Federal Reserve") — review L-2.
+    ents = heuristic_generic("The Federal Reserve raised rates. This Committee met today.")
+    names = {e.canonical_name for e in ents}
+    assert "Federal Reserve" in names
+    assert "The Federal Reserve" not in names
+    assert "The" not in names and "This" not in names
+
+
 @pytest.mark.asyncio
 async def test_generic_domain_extraction_runs_without_llm() -> None:
     spec = REGISTRY["generic"]
@@ -74,6 +84,27 @@ async def test_make_llm_extractor_parses_json_and_drops_off_schema() -> None:
     extractor = make_llm_extractor(MockLLMClient([raw]))
     result = await extract("Apple Inc. filed a 10-K.", spec, llm=extractor)
     assert [e.canonical_name for e in result.entities] == ["Apple Inc."]
+
+
+@pytest.mark.asyncio
+async def test_malformed_llm_items_are_dropped_not_raised() -> None:
+    # One malformed entity dict (and a non-dict) must not 500 /extract and fail the whole
+    # document — repair-by-dropping extends to shape (review M-8).
+    spec = REGISTRY["sec_financial"]
+
+    async def fake_llm(_text: str, _spec: DomainSpec) -> dict:
+        return {
+            "entities": [
+                {"type": "Company", "canonical_name": "Apple Inc."},  # valid
+                {"type": "Company"},                                   # missing canonical_name
+                "not-a-dict",                                          # wrong shape entirely
+            ],
+            "relations": [{"subject": "Apple Inc.", "predicate": "AUDITED_BY"}],  # missing object
+        }
+
+    result = await extract("...", spec, llm=fake_llm)
+    assert [e.canonical_name for e in result.entities] == ["Apple Inc."]  # only the valid one
+    assert result.relations == []  # the malformed relation was dropped, no exception
 
 
 def test_registry_tiers_intact() -> None:

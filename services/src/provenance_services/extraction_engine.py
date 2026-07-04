@@ -9,6 +9,7 @@ extraction uses an injectable LLM extractor (the Spark path), validated the same
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
@@ -22,6 +23,7 @@ from provenance_contracts import (
 )
 from provenance_service import LLMClient
 
+log = logging.getLogger("extraction")
 SCHEMA_VERSION = "v1"
 
 # Async; returns raw {"entities": [{"type","canonical_name"}], "relations": [...]}.
@@ -29,13 +31,19 @@ LLMExtractor = Callable[[str, DomainSpec], Awaitable[dict[str, Any]]]
 
 _PROPER = re.compile(r"\b([A-Z][a-zA-Z0-9.&]+(?:\s+[A-Z][a-zA-Z0-9.&]+)*)\b")
 _ORG_SUFFIX = ("Inc", "Inc.", "Corp", "Corp.", "Ltd", "LLC", "PLC", "Co", "Co.")
+# Sentence-initial determiners get capitalized and would otherwise be captured as entities
+# ("The", "This", …) or glued to the real name ("The Federal Reserve") — strip them (L-2).
+_LEADING_DET = {"the", "this", "that", "these", "those", "a", "an"}
 
 
 def heuristic_generic(text: str) -> list[EntityCandidate]:
     """No-LLM extraction for the generic domain: proper-noun phrases as entities."""
     seen: dict[str, EntityCandidate] = {}
     for m in _PROPER.finditer(text):
-        phrase = m.group(1).strip()
+        tokens = m.group(1).strip().split()
+        if tokens and tokens[0].lower() in _LEADING_DET:
+            tokens = tokens[1:]  # drop a leading determiner
+        phrase = " ".join(tokens)
         if len(phrase) < 3 or phrase.lower() in seen:
             continue
         etype = "Organization" if phrase.split()[-1] in _ORG_SUFFIX else "Concept"
@@ -61,14 +69,33 @@ def validate_against_schema(
     return kept, kept_rels
 
 
+def _coerce(items: object, model: type[Any], kind: str) -> list[Any]:
+    """Build contract objects from raw LLM items, dropping (and logging) malformed ones.
+
+    Repair-by-dropping extends to *shape*, not just off-schema types: a single bad dict must
+    not 500 the whole /extract and fail the document (review M-8)."""
+    if not isinstance(items, list):
+        return []
+    out: list[Any] = []
+    for item in items:
+        if not isinstance(item, dict):
+            log.warning("dropping non-dict %s candidate: %r", kind, item)
+            continue
+        try:
+            out.append(model(**item))
+        except Exception as exc:  # noqa: BLE001 - one malformed item must not fail the batch
+            log.warning("dropping malformed %s candidate %r: %s", kind, item, exc)
+    return out
+
+
 async def extract(
     text: str, spec: DomainSpec, llm: LLMExtractor | None = None
 ) -> ExtractionResult:
     """Extract typed entities/relations, validated against the domain schema."""
     if llm is not None:
         raw = await llm(text, spec)
-        entities = [EntityCandidate(**e) for e in raw.get("entities", [])]
-        relations = [RelationCandidate(**r) for r in raw.get("relations", [])]
+        entities = _coerce(raw.get("entities", []), EntityCandidate, "entity")
+        relations = _coerce(raw.get("relations", []), RelationCandidate, "relation")
     elif spec.id == GENERIC_FALLBACK_ID:
         entities, relations = heuristic_generic(text), []
     else:
@@ -98,7 +125,10 @@ def make_llm_extractor(client: LLMClient) -> LLMExtractor:
         raw = await client.complete(system, text)
         try:
             return cast("dict[str, Any]", json.loads(raw[raw.index("{"): raw.rindex("}") + 1]))
-        except Exception:
+        except Exception as exc:
+            # Garbled JSON must not silently yield an empty graph with no signal (review M-8).
+            log.warning("extraction LLM returned unparseable JSON (%s); yielding empty: %.120r",
+                        exc, raw)
             return {"entities": [], "relations": []}
 
     return _extract

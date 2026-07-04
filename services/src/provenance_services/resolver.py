@@ -63,6 +63,9 @@ class EntityResolver:
             norm = normalize_name(c.canonical_name)
             eid = entity_id(kb_id, c.type, norm)
             name_to_id[c.canonical_name] = eid
+            # Also key by the normalized form so a relation endpoint that drifted in surface
+            # form ("Acme Robotics" vs "Acme Robotics Inc") still resolves (review M-7).
+            name_to_id.setdefault(norm, eid)
             if eid in by_id:
                 continue  # already produced this batch
             if eid in known:

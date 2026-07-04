@@ -19,9 +19,32 @@ cases:
   - {id: o1, cohort: out_of_corpus, kb: kb_eval, query: "what is the CEO personal home address", expected: "not supported", answerable: false}
   - {id: o2, cohort: out_of_corpus, kb: kb_eval, query: "describe the spacecraft propulsion subsystem", expected: "not supported", answerable: false}
 
+# Held-out realistic prose (review H-12): the detector is scored on sentences a human would
+# write, NOT on the registry's own signal vocabulary stitched together (which measured only
+# whether keywords match themselves). Each domain has several natural-language probes.
 detection:
-  - {text: "the company subsidiaries officers risk factors auditor fiscal metric proceeding", expected: sec_financial}
-  - {text: "the paper method dataset findings authors institution venue citations", expected: research_papers}
-  - {text: "contract party clause obligation governing law amendment signatory", expected: legal_contracts}
-  - {text: "component api dependency version endpoint error deprecated parameter", expected: technical_software}
-  - {text: "the quick brown fox jumped over the lazy dog one sunny afternoon", expected: generic}
+  # sec_financial
+  - {text: "In fiscal 2023 the company and its wholly owned subsidiaries reported revenue growth, and the independent auditor issued an unqualified opinion.", expected: sec_financial}
+  - {text: "Management disclosed several risk factors affecting the company, including supply chain disruption and litigation involving a subsidiary.", expected: sec_financial}
+  - {text: "The registrant's officers certified the filing, and the company identified material risk factors for the reporting period.", expected: sec_financial}
+  - {text: "The audit committee engaged the auditor to review the annual report, and the company reported a new financial metric to shareholders.", expected: sec_financial}
+  # research_papers
+  - {text: "The authors propose a new method and evaluate it on a benchmark dataset, reporting significant findings over prior work.", expected: research_papers}
+  - {text: "This paper cites earlier studies and was published in a peer-reviewed venue by researchers at a leading institution.", expected: research_papers}
+  - {text: "Our experiments use the transformer method and are tested on three datasets; the results confirm the findings of related papers.", expected: research_papers}
+  - {text: "The authors report strong accuracy, and the academic community has discussed these findings and the underlying method widely.", expected: research_papers}
+  # legal_contracts
+  - {text: "The parties agree that this contract contains clauses imposing obligations, governed by the corporate policy of the firm.", expected: legal_contracts}
+  - {text: "Each party to the agreement signed the amendment, which amends the original obligations under the contract.", expected: legal_contracts}
+  - {text: "The governing clause and the termination clause were negotiated by both parties before the contract took effect.", expected: legal_contracts}
+  - {text: "This amendment modifies several clauses and imposes new obligations on the signatory parties named in the contract.", expected: legal_contracts}
+  # technical_software
+  - {text: "The API exposes a new capability, but the component depends on a library version that deprecates the old parameter.", expected: technical_software}
+  - {text: "Upgrading the dependency introduced a breaking change; the component now raises an error on invalid parameter input.", expected: technical_software}
+  - {text: "The software documentation lists each component, its dependencies, and the API versions that expose them.", expected: technical_software}
+  - {text: "This release deprecates two components and adds a parameter that raises an error when the dependency version is missing.", expected: technical_software}
+  # generic (out-of-domain prose must fall back, not force a domain)
+  - {text: "The weather was pleasant and the children played in the park all afternoon.", expected: generic}
+  - {text: "She enjoyed cooking dinner while listening to her favorite music at home.", expected: generic}
+  - {text: "The mountain trail offered a beautiful view of the valley far below.", expected: generic}
+  - {text: "He painted the fence and then relaxed on the porch with a good book.", expected: generic}

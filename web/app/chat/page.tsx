@@ -25,20 +25,27 @@ export default function ChatPage() {
   }, []);
 
   async function ask() {
-    if (!input.trim() || !kbId) return;
+    // Guard against re-entry: without this, pressing Enter while a stream is in flight would
+    // interleave two answers' tokens into one garbled message (review M-15).
+    if (busy || !input.trim() || !kbId) return;
     const query = input.trim();
     setInput("");
     setBusy(true);
     setTurn({ query, text: "", answer: null, evidence: null, phase: "retrieving" });
-    await streamQuery(kbId, query, {
-      onStatus: (phase) => setTurn((t) => (t ? { ...t, phase } : t)),
-      onToken: (text) => setTurn((t) => (t ? { ...t, text: t.text + text } : t)),
-      onDone: (answer, evidence) =>
-        setTurn((t) => (t ? { ...t, answer, evidence, phase: "done" } : t)),
-      onError: (err) =>
-        setTurn((t) => (t ? { ...t, text: `error: ${String(err)}`, phase: "error" } : t)),
-    });
-    setBusy(false);
+    const controller = new AbortController();
+    try {
+      await streamQuery(kbId, query, {
+        signal: controller.signal,
+        onStatus: (phase) => setTurn((t) => (t ? { ...t, phase } : t)),
+        onToken: (text) => setTurn((t) => (t ? { ...t, text: t.text + text } : t)),
+        onDone: (answer, evidence) =>
+          setTurn((t) => (t ? { ...t, answer, evidence, phase: "done" } : t)),
+        onError: (err) =>
+          setTurn((t) => (t ? { ...t, text: `error: ${String(err)}`, phase: "error" } : t)),
+      });
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -46,8 +53,13 @@ export default function ChatPage() {
       <h1>Chat with your documents</h1>
 
       <div className="panel" style={{ marginBottom: "1rem" }}>
-        <label>Knowledge base (R38 — scope)</label>
-        <input value={kbId} onChange={(e) => setKbId(e.target.value)} placeholder="kb_…" />
+        <label htmlFor="kb-input">Knowledge base (R38 — scope)</label>
+        <input
+          id="kb-input"
+          value={kbId}
+          onChange={(e) => setKbId(e.target.value)}
+          placeholder="kb_…"
+        />
       </div>
 
       <div className="panel" style={{ marginBottom: "1rem" }}>
@@ -56,7 +68,9 @@ export default function ChatPage() {
             className="col"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && ask()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !busy) ask();
+            }}
             placeholder="Ask a question…"
           />
           <button onClick={ask} disabled={busy || !kbId}>Ask</button>
@@ -68,7 +82,7 @@ export default function ChatPage() {
           <div className="col panel">
             <div className="msg-user">{turn.query}</div>
             {turn.phase !== "done" && turn.phase !== "error" && (
-              <p className="muted">· {turn.phase}…</p>
+              <p className="muted" aria-live="polite">· {turn.phase}…</p>
             )}
             <div className={`msg-assistant ${turn.answer?.refused ? "refusal" : ""}`}>
               {turn.text || (turn.phase === "done" ? "(no text)" : "")}

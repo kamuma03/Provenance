@@ -53,10 +53,14 @@ class GraphStore:
         document_id: str,
         trace_id: str | None = None,
     ) -> None:
+        # Include document_id in the MERGE key so a second document asserting the same
+        # relation adds its own edge rather than overwriting the first document's provenance
+        # (last-writer-wins would make r.document_id lie about origin — review M-6). Re-asserting
+        # from the *same* document stays idempotent.
         self._conn.execute(
             "MATCH (a:Entity {id: $s}), (b:Entity {id: $o}) "
-            "MERGE (a)-[r:Rel {predicate: $p}]->(b) "
-            "SET r.kb_id = $kb, r.document_id = $doc, r.trace_id = $tid",
+            "MERGE (a)-[r:Rel {predicate: $p, document_id: $doc}]->(b) "
+            "SET r.kb_id = $kb, r.trace_id = $tid",
             {"s": subject_id, "o": object_id, "p": predicate,
              "kb": kb_id, "doc": document_id, "tid": trace_id or ""},
         )
@@ -92,6 +96,23 @@ class GraphStore:
         while res.has_next():
             out.append(cast("list[Any]", res.get_next())[0])
         return out
+
+    def delete_document(self, document_id: str) -> int:
+        """Delete the relations this document authored (saga compensation, R54/review H-3).
+
+        Only relations carry document_id; entities are resolved/merged and may be shared
+        across documents, so they are intentionally left intact — removing them could erase
+        another document's provenance."""
+        res = self._query(
+            "MATCH ()-[r:Rel]->() WHERE r.document_id = $doc RETURN count(r)",
+            {"doc": document_id},
+        )
+        count = int(cast("list[Any]", res.get_next())[0]) if res.has_next() else 0
+        if count:
+            self._conn.execute(
+                "MATCH ()-[r:Rel]->() WHERE r.document_id = $doc DELETE r", {"doc": document_id}
+            )
+        return count
 
     def close(self) -> None:
         self._conn.close()

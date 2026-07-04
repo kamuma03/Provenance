@@ -9,9 +9,12 @@ service can record it per index and reject mismatched query embeddings (R66).
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import struct
 from typing import Protocol
+
+log = logging.getLogger("embedder")
 
 
 class Embedder(Protocol):
@@ -71,11 +74,21 @@ class FastEmbedEmbedder:
 
 
 def get_embedder() -> Embedder:
-    """Real fastembed model unless PROVENANCE_OFFLINE is set; else deterministic fallback."""
+    """Real fastembed model unless PROVENANCE_OFFLINE is set.
+
+    Outside offline mode a load failure is FATAL — we must never silently fall back to
+    hash pseudo-embeddings, which are dim-correct but near-random and would coexist
+    undetected with real bge vectors, grounding answers in noise (review H-7). Set
+    PROVENANCE_OFFLINE=1 to opt into the deterministic embedder deliberately.
+    """
     if os.environ.get("PROVENANCE_OFFLINE"):
         return DeterministicEmbedder()
     model_name = os.environ.get("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
     try:
         return FastEmbedEmbedder(model_name)
-    except Exception:  # pragma: no cover - offline / no model => deterministic
-        return DeterministicEmbedder()
+    except Exception as exc:
+        log.error("failed to load embedding model %r: %s", model_name, exc)
+        raise RuntimeError(
+            f"embedding model {model_name!r} failed to load; refusing to serve hash "
+            f"pseudo-embeddings. Set PROVENANCE_OFFLINE=1 to use the deterministic fallback."
+        ) from exc

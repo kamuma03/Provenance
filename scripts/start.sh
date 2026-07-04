@@ -38,7 +38,9 @@ if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then 
 [[ $llm == auto ]] && { [[ $has_gpu -eq 1 ]] && llm=on || llm=off; }
 
 if [[ $llm == on ]]; then
+  # ollama-pull sits in its own profile so --no-pull genuinely skips it (review M-18).
   export COMPOSE_PROFILES=llm
+  [[ $pull -eq 1 ]] && export COMPOSE_PROFILES=llm,llm-pull
   [[ $has_gpu -eq 1 ]] || echo "warning: --llm with no NVIDIA GPU detected — Ollama will run on CPU (slow)."
   echo "LLM tier: ON  (Ollama; synthesis/critique→high, planning/detection/extraction→low)"
 else
@@ -81,4 +83,8 @@ $( [[ $llm == on ]] && echo "  Ollama (LLM)    http://localhost:11434       (Ope
   Stop   scripts/stop.sh        (add --clean to drop data volumes)
 EOF
 
-[[ $logs -eq 1 && $dry -eq 0 ]] && exec "${COMPOSE[@]}" logs -f
+# Explicit `if` (not a trailing `&&`): under `set -e` a false test as the last command would
+# make a successful run exit non-zero, breaking any `start.sh && …` chain (review M-18).
+if [[ $logs -eq 1 && $dry -eq 0 ]]; then
+  exec "${COMPOSE[@]}" logs -f
+fi

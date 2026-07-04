@@ -5,9 +5,10 @@
 #                  -f ops/docker-compose.gpu.yml up -d
 #
 # Grants GPU access to the services that host ONNX models and flips them onto CUDA:
-#   • model       — fastembed embeddings (bge-small)      → CUDAExecutionProvider
-#   • query-agent — fastembed cross-encoder reranker      → CUDAExecutionProvider
-#   • parse       — RapidOCR (onnxruntime) for scanned pages
+#   • model — fastembed embeddings (bge-small) + the cross-encoder reranker → CUDAExecutionProvider
+#   • parse — RapidOCR (onnxruntime) for scanned pages
+# query-agent hosts NO models — it calls the model service over HTTP for embed/rerank — so it
+# gets no GPU here (removing dead config that contradicted N7, review L-11).
 # The image ships onnxruntime-gpu (see Dockerfile); PROVENANCE_ONNX_CUDA makes the embedder/
 # reranker request CUDA (with CPU fallback). Docling's layout/table models are torch (not
 # ONNX) and the image carries CPU torch, so PARSE_USE_GPU is intentionally left off here.
@@ -23,11 +24,6 @@ x-gpu-deploy: &gpu-deploy
 
 services:
   model:
-    environment:
-      PROVENANCE_ONNX_CUDA: "1"
-    deploy: *gpu-deploy
-
-  query-agent:
     environment:
       PROVENANCE_ONNX_CUDA: "1"
     deploy: *gpu-deploy

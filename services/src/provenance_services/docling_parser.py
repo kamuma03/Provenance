@@ -42,8 +42,16 @@ def _converter() -> Any:
         return DocumentConverter()
 
 
-def _bbox(prov_item, page_index: int) -> BBox:  # type: ignore[no-untyped-def]
+def _bbox(prov_item, page_index: int, page_height: float) -> BBox:  # type: ignore[no-untyped-def]
+    # Docling's PDF pipeline emits provenance bboxes in a BOTTOM-LEFT origin; our BBox
+    # contract (like pdfplumber/OCR) is TOP-LEFT. Convert so citation highlights aren't
+    # mirrored vertically on the deep-parse path (R6/R36, review H-2).
     bb = prov_item.bbox
+    if page_height and hasattr(bb, "to_top_left_origin"):
+        try:
+            bb = bb.to_top_left_origin(page_height=page_height)
+        except Exception:  # pragma: no cover - older docling API → leave as-is
+            pass
     xs = [float(bb.l), float(bb.r)]
     ys = [float(bb.t), float(bb.b)]
     return BBox(page=page_index, x0=min(xs), y0=min(ys), x1=max(xs), y1=max(ys))
@@ -62,7 +70,10 @@ def parse_pdf_bytes_docling(content: bytes) -> ParseResult:
         if not getattr(item, "prov", None):
             continue
         prov = item.prov[0]
-        page_index = int(prov.page_no) - 1  # Docling pages are 1-indexed; we use 0-indexed
+        page_no = int(prov.page_no)
+        page_index = page_no - 1  # Docling pages are 1-indexed; we use 0-indexed
+        page = doc.pages.get(page_no) if hasattr(doc.pages, "get") else None
+        page_height = float(page.size.height) if page and getattr(page, "size", None) else 0.0
 
         if isinstance(item, TableItem):
             text = item.export_to_markdown(doc=doc) if hasattr(item, "export_to_markdown") else ""
@@ -79,17 +90,21 @@ def parse_pdf_bytes_docling(content: bytes) -> ParseResult:
         elements.append(
             ParsedElement(
                 element_type=etype, text=text, page=page_index,
-                bbox=_bbox(prov, page_index), reading_order=order,
+                bbox=_bbox(prov, page_index, page_height), reading_order=order,
             )
         )
         order += 1
 
-    n_pages = doc.num_pages() if hasattr(doc, "num_pages") else 1
+    n_pages = (doc.num_pages() if hasattr(doc, "num_pages") else 1) or 1
+    # Docling decides text-layer vs OCR internally per page and doesn't surface which was used,
+    # so we record its unified pipeline method for every page rather than leaving page_methods
+    # empty (which read as "no provenance"). Honest within what the backend exposes (R63/M-13).
+    page_methods = {p: ParseMethod.TEXT_LAYER for p in range(n_pages)}
     return ParseResult(
         elements=elements,
-        pages=n_pages or 1,
-        parse_method=ParseMethod.TEXT_LAYER,  # Docling handles text-layer vs OCR internally
-        page_methods={},
+        pages=n_pages,
+        parse_method=ParseMethod.TEXT_LAYER,
+        page_methods=page_methods,
         engine=DOCLING_ENGINE,
         engine_version="docling",
     )

@@ -5,10 +5,14 @@ import { createKb, getDocument, uploadDocument } from "@/lib/api";
 import { DOMAINS, type ProcessingTier } from "@/lib/types";
 
 async function fileToBase64(file: File): Promise<string> {
-  const buf = await file.arrayBuffer();
+  // Encode in 32KB chunks rather than concatenating one character at a time, which is O(n²)
+  // and freezes the tab on large (tens-of-MB) files (review M-17).
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const CHUNK = 0x8000;
   let binary = "";
-  const bytes = new Uint8Array(buf);
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
   return btoa(binary);
 }
 

@@ -40,6 +40,47 @@ def test_merge_is_idempotent(tmp_path: Path) -> None:
         gs.close()
 
 
+def test_delete_document_removes_its_relations_but_keeps_shared_entities(tmp_path: Path) -> None:
+    # Saga compensation for a failed graph write: drop the document's relations, leave the
+    # resolved (possibly shared) entities intact (R54, review H-3).
+    gs = GraphStore(str(tmp_path / "g4"))
+    try:
+        gs.upsert_entities([
+            _ent("e_apple", "kb1", "Company", "Apple"),
+            _ent("e_ey", "kb1", "Auditor", "EY"),
+        ])
+        gs.write_relation("e_apple", "AUDITED_BY", "e_ey", kb_id="kb1", document_id="d1")
+        gs.write_relation("e_apple", "MENTIONS", "e_ey", kb_id="kb1", document_id="d2")
+
+        removed = gs.delete_document("d1")
+        assert removed == 1
+        assert gs.neighbors("e_apple") == ["e_ey"]  # d2's relation still links them
+        assert gs.entity_count("kb1") == 2  # entities are not deleted
+        assert gs.delete_document("d1") == 0  # idempotent
+    finally:
+        gs.close()
+
+
+def test_same_relation_from_two_documents_keeps_both_provenances(tmp_path: Path) -> None:
+    # Additive provenance (review M-6): two documents asserting the same (subject, predicate,
+    # object) must not overwrite each other — deleting one leaves the other's edge intact.
+    gs = GraphStore(str(tmp_path / "g5"))
+    try:
+        gs.upsert_entities([
+            _ent("e_apple", "kb1", "Company", "Apple"),
+            _ent("e_ey", "kb1", "Auditor", "EY"),
+        ])
+        gs.write_relation("e_apple", "AUDITED_BY", "e_ey", kb_id="kb1", document_id="d1")
+        gs.write_relation("e_apple", "AUDITED_BY", "e_ey", kb_id="kb1", document_id="d2")
+
+        assert gs.delete_document("d1") == 1  # only d1's edge removed
+        assert gs.neighbors("e_apple") == ["e_ey"]  # d2's edge still links them
+        assert gs.delete_document("d2") == 1  # d2's edge was preserved and is now removed
+        assert gs.neighbors("e_apple") == []
+    finally:
+        gs.close()
+
+
 def test_kb_partitioning_isolates_subgraphs(tmp_path: Path) -> None:
     gs = GraphStore(str(tmp_path / "g3"))
     try:

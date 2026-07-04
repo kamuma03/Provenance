@@ -7,11 +7,14 @@ SagaPause to park the saga (detect-but-confirm, R9/R55) without compensating.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import StrEnum
 
 from pydantic import BaseModel
+
+log = logging.getLogger("saga")
 
 Ctx = dict[str, object]
 StepFn = Callable[[Ctx], Awaitable[None]]
@@ -65,8 +68,10 @@ class Saga:
                         try:
                             await done.compensate(ctx)
                             compensated.append(done.name)
-                        except Exception:  # noqa: BLE001 - best-effort rollback
-                            pass
+                        except Exception as comp_exc:  # noqa: BLE001 - best-effort rollback
+                            # A failed rollback can leave orphaned state; never hide it (M-12).
+                            log.warning("compensation for step %s failed: %s",
+                                        done.name, comp_exc)
                 return SagaOutcome(
                     status=SagaStatus.FAILED,
                     completed=[s.name for s in completed],

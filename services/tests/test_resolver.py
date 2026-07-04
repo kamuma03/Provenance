@@ -47,3 +47,12 @@ def test_distinct_entities_get_distinct_ids() -> None:
 def test_kb_scoping_isolates_ids() -> None:
     # Same name in different KBs must not collide (R4).
     assert entity_id("kbA", "Company", "apple") != entity_id("kbB", "Company", "apple")
+
+
+def test_name_to_id_has_normalized_alias_for_endpoint_drift() -> None:
+    # A relation endpoint that drifted in surface form ("Acme Robotics" vs the entity's
+    # "Acme Robotics Inc") must still resolve to the same id via the normalized alias (M-7).
+    r = EntityResolver()
+    res = r.resolve("kb1", [EntityCandidate(type="Company", canonical_name="Acme Robotics Inc")])
+    eid = res.name_to_id["Acme Robotics Inc"]
+    assert res.name_to_id.get("acme robotics") == eid  # normalized form resolves too

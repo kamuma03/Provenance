@@ -31,7 +31,8 @@ x-service-base: &service-base
     LLM_SYNTHESIZER: high
     LLM_CRITIC: high
     LLM_EVAL_JUDGE: ${LLM_EVAL_JUDGE:-anthropic:claude-opus-4-8}
-    ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    # ANTHROPIC_API_KEY is NOT set here — it's scoped to the two services that route tasks to
+    # Claude (query-agent, extraction), not fanned out to all 8 containers (review H-13).
   depends_on:
     - nats
     - otel-collector
@@ -39,20 +40,26 @@ x-service-base: &service-base
 
 services:
   # ---- infrastructure ----
+  # Datastores bind to loopback only (review H-13): Docker's iptables rules otherwise publish
+  # them on 0.0.0.0 past the host firewall, letting any LAN machine rewrite the catalog or
+  # inject ingest events. Only the Gateway is meant to face the network.
   nats:
     image: nats:2.10
     command: ["-js"]
-    ports: ["4222:4222"]
+    ports: ["127.0.0.1:4222:4222"]
 
   postgres:
     image: postgres:16
     environment:
-      POSTGRES_USER: provenance
-      POSTGRES_PASSWORD: change-me
-      POSTGRES_DB: provenance
+      POSTGRES_USER: ${POSTGRES_USER:-provenance}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}  # from .env, single source of truth
+      POSTGRES_DB: ${POSTGRES_DB:-provenance}
     volumes:
+      # Persist the catalog across container recreation — without this the whole catalog is
+      # lost on `docker compose down/up` while kuzu_data survives (split-brain, review H-3d).
+      - pg_data:/var/lib/postgresql/data
       - ./sql/catalog_init.sql:/docker-entrypoint-initdb.d/catalog_init.sql:ro
-    ports: ["5432:5432"]
+    ports: ["127.0.0.1:5432:5432"]
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.111.0
@@ -64,11 +71,11 @@ services:
   # On-demand multi-model load by name: the router sends per-task model names and Ollama
   # loads each, keeping both tiers warm (128GB unified memory on the Spark fits both).
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.5.7           # pinned, not :latest, so rebuilds are reproducible
     profiles: ["llm"]                    # opt-in: started by scripts/start.sh (or --profile llm)
     volumes:
       - ollama_data:/root/.ollama
-    ports: ["11434:11434"]
+    ports: ["127.0.0.1:11434:11434"]
     # GPU passthrough (needs nvidia-container-toolkit on the host; ignored on CPU-only).
     deploy:
       resources:
@@ -81,8 +88,8 @@ services:
 
   # One-shot: pull the two tier models into the shared volume, then exit.
   ollama-pull:
-    image: ollama/ollama:latest
-    profiles: ["llm"]
+    image: ollama/ollama:0.5.7          # pinned to match the ollama service
+    profiles: ["llm-pull"]              # separate profile so start.sh --no-pull can skip it
     depends_on:
       - ollama
     environment:
@@ -99,9 +106,9 @@ services:
       <<: *service-env
       service_name: gateway
       POSTGRES_HOST: postgres
-      POSTGRES_USER: provenance
-      POSTGRES_PASSWORD: change-me
-      POSTGRES_DB: provenance
+      POSTGRES_USER: ${POSTGRES_USER:-provenance}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: ${POSTGRES_DB:-provenance}
       QUERY_URL: http://query-agent:8000
     ports: ["8000:8000"]
     depends_on:
@@ -125,7 +132,11 @@ services:
   extraction:
     <<: *service-base
     command: ["uvicorn", "provenance_services.extraction:app", "--host", "0.0.0.0", "--port", "8000"]
-    environment: { <<: *service-env, service_name: extraction }
+    # Claude-routing service → gets the API key (scoped, not fanned out to all 8 — H-13).
+    environment:
+      <<: *service-env
+      service_name: extraction
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
 
   vector:
     <<: *service-base
@@ -147,8 +158,13 @@ services:
   query-agent:
     <<: *service-base
     command: ["uvicorn", "provenance_services.query_agent:app", "--host", "0.0.0.0", "--port", "8000"]
-    environment: { <<: *service-env, service_name: query-agent }
+    # Hosts the agent crew (synthesizer/critic can route to Claude) → scoped API key (H-13).
+    environment:
+      <<: *service-env
+      service_name: query-agent
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
 
 volumes:
   kuzu_data:
   ollama_data:
+  pg_data:

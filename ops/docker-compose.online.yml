@@ -8,6 +8,8 @@
 #   • LLM points at the HOST Ollama (already serving qwen3.6:27b / qwen3.5:9b) instead of the
 #     bundled compose Ollama — so we don't collide on :11434 or re-pull the tier models.
 #   • extra_hosts maps host.docker.internal → the host, so containers reach that Ollama.
+#   • the Vector service uses PERSISTENT Qdrant (not in-memory FAISS) so `restart vector`
+#     doesn't silently erase every index while the catalog says done (review H-3).
 # The compose `ollama` / `ollama-pull` services stay down (they're profile-gated to `llm`).
 name: provenance
 
@@ -19,6 +21,13 @@ x-online-hosts: &online-hosts
   - "host.docker.internal:host-gateway"
 
 services:
+  # Persistent vector backend for the online path (data survives container recreation).
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+
   gateway:
     environment: *online-env
     extra_hosts: *online-hosts
@@ -32,8 +41,13 @@ services:
     environment: *online-env
     extra_hosts: *online-hosts
   vector:
-    environment: *online-env
+    environment:
+      <<: *online-env
+      VECTOR_BACKEND: qdrant
+      QDRANT_URL: http://qdrant:6333
     extra_hosts: *online-hosts
+    depends_on:
+      - qdrant
   graph:
     environment: *online-env
     extra_hosts: *online-hosts
@@ -43,3 +57,6 @@ services:
   query-agent:
     environment: *online-env
     extra_hosts: *online-hosts
+
+volumes:
+  qdrant_data:
