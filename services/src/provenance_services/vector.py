@@ -5,9 +5,10 @@ P1: in-memory FAISS adapter (namespace = kb_id). Qdrant/pgvector adapters land i
 
 from __future__ import annotations
 
-from fastapi import HTTPException, Request
+from fastapi import HTTPException
 from provenance_contracts import VectorRecord
 from provenance_service import create_app, tracer
+from pydantic import BaseModel, Field
 
 from .vector_factory import get_vector_store
 
@@ -20,56 +21,65 @@ _store = get_vector_store()  # VECTOR_BACKEND: faiss | qdrant | pgvector (R20/N4
 _namespace_model: dict[str, str] = {}
 
 
+# Typed internal request bodies (N9, review M-5).
+class UpsertRequest(BaseModel):
+    namespace: str = "default"
+    model_id: str | None = None
+    records: list[VectorRecord] = Field(default_factory=list)
+
+
+class DeleteRequest(BaseModel):
+    namespace: str = "default"
+    document_id: str = ""
+
+
+class QueryRequest(BaseModel):
+    namespace: str = "default"
+    vector: list[float] = Field(default_factory=list)
+    k: int = 5
+    filter: dict[str, str] | None = None
+    text: str | None = None
+
+
 @app.post("/upsert", tags=["vector"])
-async def upsert(req: Request) -> dict[str, object]:
-    body = await req.json()
-    namespace = body.get("namespace", "default")
-    model_id = body.get("model_id")
-    records = [VectorRecord(**r) for r in body.get("records", [])]
+async def upsert(body: UpsertRequest) -> dict[str, object]:
     with tracer("vector").start_as_current_span("vector.upsert") as span:
-        if model_id:
-            existing = _namespace_model.get(namespace)
-            if existing is not None and existing != model_id:
+        if body.model_id:
+            existing = _namespace_model.get(body.namespace)
+            if existing is not None and existing != body.model_id:
                 raise HTTPException(
                     status_code=409,
                     detail=(
-                        f"namespace {namespace!r} was indexed with embedding model "
-                        f"{existing!r}; refusing records from {model_id!r} (R66)"
+                        f"namespace {body.namespace!r} was indexed with embedding model "
+                        f"{existing!r}; refusing records from {body.model_id!r} (R66)"
                     ),
                 )
-            _namespace_model[namespace] = model_id
-            span.set_attribute("vector.model_id", model_id)
-        await _store.upsert(namespace, records)
-        span.set_attribute("vector.upserted", len(records))
-        return {"ok": True, "upserted": len(records)}
+            _namespace_model[body.namespace] = body.model_id
+            span.set_attribute("vector.model_id", body.model_id)
+        await _store.upsert(body.namespace, body.records)
+        span.set_attribute("vector.upserted", len(body.records))
+        return {"ok": True, "upserted": len(body.records)}
 
 
 @app.post("/delete", tags=["vector"])
-async def delete(req: Request) -> dict[str, object]:
+async def delete(body: DeleteRequest) -> dict[str, object]:
     """Delete a document's records (saga compensation, R54/H-3)."""
-    body = await req.json()
-    namespace = body.get("namespace", "default")
-    document_id = body.get("document_id", "")
     with tracer("vector").start_as_current_span("vector.delete") as span:
-        removed = await _store.delete(namespace, document_id) if document_id else 0
+        removed = await _store.delete(body.namespace, body.document_id) if body.document_id else 0
         span.set_attribute("vector.deleted", removed)
         return {"deleted": removed}
 
 
 @app.post("/query", tags=["vector"])
-async def query(req: Request) -> dict[str, object]:
+async def query(body: QueryRequest) -> dict[str, object]:
     """Dense by default; hybrid (dense + BM25) when `text` is provided (R24)."""
-    body = await req.json()
-    namespace = body.get("namespace", "default")
-    vector = body.get("vector", [])
-    k = int(body.get("k", 5))
-    filter = body.get("filter")
-    text = body.get("text")
     with tracer("vector").start_as_current_span("vector.query") as span:
-        if text:
-            hits = await _store.hybrid_query(namespace, vector, text, k, filter)
+        if body.text:
+            hits = await _store.hybrid_query(
+                body.namespace, body.vector, body.text, body.k, body.filter
+            )
             span.set_attribute("vector.mode", "hybrid")
         else:
-            hits = await _store.query(namespace, vector, k, filter)
+            hits = await _store.query(body.namespace, body.vector, body.k, body.filter)
             span.set_attribute("vector.mode", "dense")
         return {"hits": [h.model_dump() for h in hits]}

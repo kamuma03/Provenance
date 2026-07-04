@@ -17,12 +17,16 @@ import os
 from typing import cast
 
 import anyio
-from fastapi import Request
 from provenance_contracts import ParseResult
 from provenance_service import create_app, tracer
+from pydantic import BaseModel
 
 log = logging.getLogger("parse")
 app = create_app("parse")
+
+
+class ParseRequest(BaseModel):
+    content_b64: str = ""
 
 
 def parse_document(content: bytes) -> ParseResult:
@@ -44,10 +48,9 @@ def parse_document(content: bytes) -> ParseResult:
 
 
 @app.post("/parse", tags=["parse"])
-async def parse(req: Request) -> dict[str, object]:
+async def parse(body: ParseRequest) -> dict[str, object]:
     """Parse a base64-encoded PDF into typed elements with geometry + provenance."""
-    body = await req.json()
-    content_b64 = body.get("content_b64", "")
+    content_b64 = body.content_b64
     with tracer("parse").start_as_current_span("parse.document") as span:
         if not content_b64:
             # No payload (e.g. P0-style ping): return an empty, well-formed result.

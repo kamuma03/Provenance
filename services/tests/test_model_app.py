@@ -22,6 +22,11 @@ def test_embed_returns_vectors_through_the_thread_pool() -> None:
     assert body["dim"] == len(body["embeddings"][0])
 
 
+def test_embed_rejects_wrong_typed_body() -> None:
+    # Typed internal endpoints validate input instead of silently coercing (review M-5).
+    assert client.post("/embed", json={"texts": "not-a-list"}).status_code == 422
+
+
 def test_rerank_orders_the_relevant_document_first() -> None:
     r = client.post("/rerank", json={
         "query": "annual revenue",

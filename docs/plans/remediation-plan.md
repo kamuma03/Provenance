@@ -77,12 +77,21 @@ docs stop describing infrastructure that doesn't exist.
 >   job, and resumes via `POST /documents/{id}/confirm` → `ingest.confirm`. (Paused jobs are
 >   held in-memory for v1; a durable JetStream-KV store is the next step.)
 >
-> **Still deferred** (honest notes):
-> - H-13: non-root container user, `uv sync --frozen`, pinning the `ghcr.io/astral-sh/uv` copy
->   source — the multi-GB CUDA Docker image can't be built/exercised in this environment.
-> - M-5: typing every internal service endpoint (trusted service-to-service; low value).
-> - M-3: durable (restart-surviving) storage of paused jobs.
-> - M-17: pre-baking the HuggingFace reranker export for fully air-gapped image rebuilds.
+> **Second follow-up round (`chore/close-deferred`) — all remaining deferrals addressed:**
+> - H-13 ✅ — Dockerfile now pins the uv copy image (`0.9.18`), installs from a lockfile-derived
+>   `ops/requirements.lock.txt` (CI drift-checked) instead of a fresh `-e` resolution, and runs as
+>   a non-root `appuser` (with `/data` pre-owned so the Kuzu volume stays writable). *The multi-GB
+>   CUDA image still can't be built in this environment — the changes are standard patterns,
+>   validated by compose-config + the lockfile drift check, but the image build itself is unverified.*
+> - M-5 ✅ — every internal service endpoint is now typed with a Pydantic request body (422 on bad
+>   input, full OpenAPI), completing the edge-only typing.
+> - M-3 ✅ — paused jobs are stored in a JetStream KV bucket (durable across restarts), with the
+>   in-memory dict as the no-JetStream fallback.
+> - M-17 ✅ — the reranker export uses a BuildKit HF cache mount so rebuilds don't re-download
+>   (air-gap rebuild path).
+>
+> **Every review finding is now fixed.** The only caveat is the H-13 Docker image build, which
+> cannot be exercised in this environment; its changes follow standard Docker/uv patterns.
 >
 > - L-10: keyboard-accessible citations, `htmlFor` labels, and `aria-live` streaming status are
 >   done; carrying real **page dimensions in the Citation contract** (so the bbox highlight isn't
