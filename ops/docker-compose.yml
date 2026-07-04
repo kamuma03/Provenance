@@ -177,6 +177,13 @@ services:
       - gateway
     restart: unless-stopped
 
+# NOTE (non-root upgrade, H-13): the app image now runs as a non-root user (uid 10001) and
+# the Kuzu volume (kuzu_data → /data) is written by it. Docker copies the image's /data
+# ownership onto a FRESH volume, so clean deploys just work. But a volume created by an OLDER
+# root-built image stays root-owned, and the graph service then hits "Permission denied" on
+# /data/kuzu. When upgrading such a deployment, recreate the volume once:
+#   docker compose down && docker volume rm provenance_kuzu_data && docker compose up -d
+# (or `chown -R 10001 <volume mountpoint>`). Verified end-to-end on the DGX Spark.
 volumes:
   kuzu_data:
   ollama_data:
