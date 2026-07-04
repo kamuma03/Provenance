@@ -15,7 +15,7 @@ export default function CitationPanel({ claims }: { claims: Claim[] }) {
         <div className="claim" key={i}>
           <div>{claim.text}</div>
           <div style={{ marginTop: 4 }}>
-            {claim.citations.map((c) => (
+            {(claim.citations ?? []).map((c) => (
               <span
                 key={c.chunk_id}
                 className="cite"

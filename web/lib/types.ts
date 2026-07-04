@@ -1,47 +1,13 @@
-export interface BBox {
-  page: number;
-  x0: number;
-  y0: number;
-  x1: number;
-  y1: number;
-  page_width?: number | null;
-  page_height?: number | null;
-}
+// Cross-service types are GENERATED from the Pydantic contracts (single source of truth, N9)
+// — never hand-copied. Regenerate with `python scripts/gen_ts_contracts.py`; CI checks drift.
+import type { Answer, EvidenceSet } from "./contracts.gen";
 
-export interface Citation {
-  chunk_id: string;
-  page: number;
-  bbox: BBox;
-}
+export type { Answer, BBox, Citation, Claim, ScoredChunk } from "./contracts.gen";
 
-export interface Claim {
-  text: string;
-  citations: Citation[];
-  grounded: boolean | null;
-}
+// The UI's name for the retriever's EvidenceSet.
+export type Evidence = EvidenceSet;
 
-export interface Answer {
-  text: string;
-  claims: Claim[];
-  refused: boolean;
-  refusal_reason: string | null;
-}
-
-export interface ScoredChunk {
-  chunk_id: string;
-  text: string;
-  page: number;
-  bbox: BBox;
-  score: number;
-}
-
-export interface Evidence {
-  subquery: string;
-  chunks: ScoredChunk[];
-  entity_ids: string[];
-  graph_expanded: boolean;
-}
-
+// ---- web-only types (not cross-service contracts) ----
 export interface StreamHandlers {
   onStatus?: (phase: string) => void;
   onToken?: (text: string) => void;

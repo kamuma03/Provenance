@@ -164,6 +164,19 @@ services:
       service_name: query-agent
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
 
+  # ---- web UI ----
+  # Part of the "as an end user runs it" stack (review M-17), not a manual `next dev`. The
+  # browser reaches the Gateway at the host-published http://localhost:8000 (default), so no
+  # build arg is needed. Served on http://localhost:3000.
+  web:
+    build:
+      context: ../web
+      dockerfile: Dockerfile
+    ports: ["3000:3000"]
+    depends_on:
+      - gateway
+    restart: unless-stopped
+
 volumes:
   kuzu_data:
   ollama_data:
