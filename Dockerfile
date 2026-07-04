@@ -12,7 +12,11 @@ RUN pip install --no-cache-dir --root-user-action=ignore \
     && pip install --no-cache-dir --root-user-action=ignore \
         optimum-onnx transformers onnx onnxruntime numpy sentencepiece
 ARG RERANKER_MODEL=BAAI/bge-reranker-v2-m3
-RUN optimum-cli export onnx --model "${RERANKER_MODEL}" \
+# Cache the HuggingFace download across builds so a rebuild doesn't re-fetch the model — the
+# review's air-gapped-rebuild concern (M-17). For a fully offline build, pre-populate this
+# BuildKit cache once (or point HF_HOME at a mounted, pre-downloaded cache).
+RUN --mount=type=cache,target=/root/.cache/huggingface \
+    optimum-cli export onnx --model "${RERANKER_MODEL}" \
         --task text-classification /export/bge-reranker-v2-m3
 
 # Single image for all services; compose runs each as its own container with a per-service
@@ -30,15 +34,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.9.18 /uv /usr/local/bin/uv
 
 WORKDIR /app
 
-# Install workspace packages (editable) so any service entrypoint is importable.
+# Reproducible install (review H-13): all third-party deps come from ops/requirements.lock.txt
+# (exported from uv.lock and drift-checked in CI), so the image can't diverge from the tested
+# lockfile the way a fresh `uv pip install -e` resolution could. The workspace packages are then
+# installed editable with --no-deps (no re-resolution) so their source is importable.
 COPY pyproject.toml ./
+COPY ops/requirements.lock.txt ./ops/requirements.lock.txt
 COPY packages ./packages
 COPY services ./services
-RUN uv pip install --system --break-system-packages \
+RUN uv pip install --system --break-system-packages -r ops/requirements.lock.txt \
+    && uv pip install --system --break-system-packages --no-deps \
         -e packages/contracts -e packages/service -e services
 
 # Swap the CPU onnxruntime (pulled transitively by fastembed / rapidocr) for the CUDA build,
@@ -63,6 +72,13 @@ RUN set -eu; \
 # Bake the exported reranker; provenance_services.reranker loads it from here on CUDA when
 # RERANKER_MODEL=BAAI/bge-reranker-v2-m3 (the basename maps to <RERANKER_ONNX_ROOT>/<name>).
 COPY --from=reranker-export /export/bge-reranker-v2-m3 /opt/models/bge-reranker-v2-m3
+
+# Run as a non-root user (review H-13). /data is pre-created and owned by it so the graph
+# service's Kuzu named volume (mounted at /data) inherits writable ownership on first use.
+RUN useradd --system --create-home --uid 10001 appuser \
+    && mkdir -p /data \
+    && chown -R appuser:appuser /app /data /opt/models
+USER appuser
 
 EXPOSE 8000
 
