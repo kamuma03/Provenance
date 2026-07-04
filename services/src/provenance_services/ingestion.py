@@ -21,7 +21,7 @@ from provenance_service import NatsBus, ServiceSettings, create_app, tracer
 
 from .chunker import chunk_elements
 from .clients import call
-from .saga import Ctx, Saga, SagaStatus, Step
+from .saga import Ctx, Saga, SagaPause, SagaStatus, Step
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("ingestion")
@@ -31,7 +31,16 @@ bus = NatsBus(settings.nats_url)
 
 INGEST_SUBJECT = "ingest.jobs"
 STATUS_SUBJECT = "ingest.status"
+CONFIRM_SUBJECT = "ingest.confirm"
 INGEST_STREAM = "INGEST"
+
+# detect-but-confirm (R9/R55, review M-3): when a low-confidence domain detection would need
+# human confirmation, pause the saga instead of auto-proceeding. Off by default (auto-confirm)
+# so existing behavior is unchanged; set REQUIRE_DOMAIN_CONFIRM=1 to require confirmation.
+_REQUIRE_CONFIRM = os.environ.get("REQUIRE_DOMAIN_CONFIRM", "").lower() in ("1", "true", "yes")
+# Paused jobs held until a /confirm arrives. In-memory for v1 — a restart loses them and the
+# user re-uploads; a durable store (JetStream KV) is the next step.
+_paused_jobs: dict[str, dict[str, object]] = {}
 
 # Domain detection needs only a sample; extraction must cover the WHOLE document, batched
 # into windows through the cheap LLM tier so entities/relations past page ~2 reach the graph
@@ -99,6 +108,9 @@ async def _detect_step(c: Ctx) -> None:
     resp = await call("extraction", "/detect", {"text": sample})
     c["domain"] = resp.get("domain", "generic")
     c["detection_confidence"] = resp.get("confidence")
+    # Pause for confirmation on a low-confidence detection unless already confirmed (R9/R55).
+    if _REQUIRE_CONFIRM and resp.get("needs_confirmation") and not c.get("confirmed"):
+        raise SagaPause(f"domain '{c['domain']}' needs confirmation")
 
 
 async def _extract_step(c: Ctx) -> None:
@@ -210,6 +222,7 @@ async def _run_saga(data: bytes, _headers: dict[str, str]) -> None:
             "document_id": doc_id,
             "kb_id": job.get("kb_id", "?"),
             "content_b64": job.get("content_b64", ""),
+            "confirmed": job.get("confirmed", False),  # set true on a resumed job (R55)
         }
         with tracer("ingestion").start_as_current_span("ingestion.saga") as span:
             ctx["trace_id"] = format(span.get_span_context().trace_id, "032x")
@@ -222,9 +235,10 @@ async def _run_saga(data: bytes, _headers: dict[str, str]) -> None:
                 log.error("saga FAILED at %s for %s: %s",
                           outcome.failed_step, doc_id, outcome.error)
             elif outcome.status is SagaStatus.PAUSED:
-                # detect-but-confirm (R9/R55): the saga parked for confirmation. Report it so
-                # the document isn't silently stuck with no status. The interactive resume flow
-                # is deferred — see docs/plans/remediation-plan.md (M-3).
+                # detect-but-confirm (R9/R55): the saga parked for confirmation. Hold the job so
+                # /confirm can resume it, and report the status so the document isn't silently
+                # stuck (review M-3).
+                _paused_jobs[doc_id] = job
                 await _publish_status(doc_id, "awaiting_confirm")
                 log.info("saga PAUSED at %s for %s (awaiting confirmation)",
                          outcome.failed_step, doc_id)
@@ -237,12 +251,27 @@ async def _run_saga(data: bytes, _headers: dict[str, str]) -> None:
             await _publish_status(doc_id, "failed")
 
 
+async def _on_confirm(data: bytes, _headers: dict[str, str]) -> None:
+    """Resume a paused document once the user confirms the detected domain (R55, M-3)."""
+    try:
+        evt = json.loads(data or b"{}")
+        doc_id = str(evt.get("document_id", ""))
+        job = _paused_jobs.pop(doc_id, None)
+        if job is None:
+            log.warning("confirm for %s but no paused job is held (restarted?)", doc_id)
+            return
+        await _run_saga(json.dumps({**job, "confirmed": True}).encode(), {})
+    except Exception:
+        log.exception("confirm handler error")
+
+
 async def _on_startup() -> None:
     await bus.connect()
     # Durable consumer: ack only after the saga finishes, so an ingestion crash mid-saga
     # redelivers the job instead of stranding the document at queued/parsing (H-3).
     await bus.ensure_stream(INGEST_STREAM, [INGEST_SUBJECT])
     await bus.subscribe_durable(INGEST_SUBJECT, _run_saga, durable="ingestion", queue="ingestion")
+    await bus.subscribe(CONFIRM_SUBJECT, _on_confirm, queue="ingestion")  # resume on confirm (R55)
     log.info("subscribed (durable) to %s", INGEST_SUBJECT)
 
 
