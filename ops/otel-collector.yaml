@@ -11,7 +11,9 @@ processors:
 
 exporters:
   debug:
-    verbosity: detailed
+    # `normal`, not `detailed`: detailed dumps all span attributes to the collector logs, which
+    # would print ingested document content once spans carry chunk text (review L-12).
+    verbosity: normal
 
 service:
   pipelines:

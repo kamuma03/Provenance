@@ -56,7 +56,10 @@ def _write_sync(
 ) -> dict[str, int]:
     store = _get_store()
     with _access_lock:
-        res = _resolver.resolve(kb_id, candidates)
+        # Pass the KB's existing entity ids so merged-vs-created is counted correctly, instead
+        # of reporting every entity as newly created (review L-1).
+        known = {eid for eid, _t, _n in store.entities(kb_id)}
+        res = _resolver.resolve(kb_id, candidates, known_ids=known)
         store.upsert_entities(res.entities)
 
         def _endpoint(name: object) -> str | None:

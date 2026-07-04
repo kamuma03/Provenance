@@ -48,7 +48,11 @@ def create_app(
     @app.get("/ready", tags=["ops"])
     async def ready() -> JSONResponse:
         """Readiness (R69): dependencies are reachable. Degrades gracefully (N6)."""
-        ok = True if readiness is None else await readiness()
+        try:
+            ok = True if readiness is None else await readiness()
+        except Exception:
+            # A probe that raises means not-ready (503), not a server error (500) — review L-7.
+            ok = False
         return JSONResponse(
             status_code=200 if ok else 503,
             content={"ready": ok, "service": service_name},

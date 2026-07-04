@@ -73,9 +73,14 @@ docs stop describing infrastructure that doesn't exist.
 > - M-17: a **web service in the compose stack** and pre-baking the HuggingFace reranker export for
 >   air-gapped rebuilds (the `.dockerignore` and the ingest-page O(n²) base64 freeze are fixed).
 >
+> - L-10: keyboard-accessible citations, `htmlFor` labels, and `aria-live` streaming status are
+>   done; carrying real **page dimensions in the Citation contract** (so the bbox highlight isn't
+>   hardcoded to US-Letter 612×792) is a cross-cutting contract change left as a follow-up.
+>
 > The remaining web `npm audit` highs (`glob` dev-only, `next`/`postcss`) require a breaking Next
 > 15/16 major and are out of scope; the critical CVE is fixed by the 14.2.33 bump.
-> Phase 3 (Low) remains open.
+> **Phase 3 (Low) ✅ done** except the noted L-10 contract change. All review findings are now
+> either fixed or explicitly deferred with rationale above.
 
 ## Phase 1 — Groundedness & retrieval robustness (this cycle, High severity)
 

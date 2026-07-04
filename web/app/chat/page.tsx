@@ -53,8 +53,13 @@ export default function ChatPage() {
       <h1>Chat with your documents</h1>
 
       <div className="panel" style={{ marginBottom: "1rem" }}>
-        <label>Knowledge base (R38 — scope)</label>
-        <input value={kbId} onChange={(e) => setKbId(e.target.value)} placeholder="kb_…" />
+        <label htmlFor="kb-input">Knowledge base (R38 — scope)</label>
+        <input
+          id="kb-input"
+          value={kbId}
+          onChange={(e) => setKbId(e.target.value)}
+          placeholder="kb_…"
+        />
       </div>
 
       <div className="panel" style={{ marginBottom: "1rem" }}>
@@ -77,7 +82,7 @@ export default function ChatPage() {
           <div className="col panel">
             <div className="msg-user">{turn.query}</div>
             {turn.phase !== "done" && turn.phase !== "error" && (
-              <p className="muted">· {turn.phase}…</p>
+              <p className="muted" aria-live="polite">· {turn.phase}…</p>
             )}
             <div className={`msg-assistant ${turn.answer?.refused ? "refusal" : ""}`}>
               {turn.text || (turn.phase === "done" ? "(no text)" : "")}

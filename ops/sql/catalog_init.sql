@@ -15,7 +15,11 @@ CREATE TABLE IF NOT EXISTS document (
     content_type          TEXT NOT NULL,
     content_hash          TEXT NOT NULL,     -- idempotency key (N5)
     tier                  TEXT NOT NULL DEFAULT 'full',
-    status                TEXT NOT NULL DEFAULT 'queued',
+    -- Constrain status to the saga's lifecycle values so a typo'd status is rejected at write
+    -- time instead of leaving the UI polling forever (review L-9).
+    status                TEXT NOT NULL DEFAULT 'queued'
+        CHECK (status IN ('queued', 'parsing', 'detecting', 'extracting', 'embedding',
+                          'done', 'failed', 'awaiting_confirm')),
     -- provenance of how the document was processed (R11, R63)
     detected_domain       TEXT,
     detection_confidence  REAL,

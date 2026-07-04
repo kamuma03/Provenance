@@ -9,12 +9,15 @@ PaddleOCR, CPU, bbox-preserving — see ocr_engine.py); Docling is the richer Sp
 from __future__ import annotations
 
 import io
+import logging
 from collections import Counter
 
 import pdfplumber
 from provenance_contracts import BBox, ElementType, ParsedElement, ParseMethod, ParseResult
 
 from .ocr_engine import OCR_ENGINE_ID
+
+log = logging.getLogger("parse_engine")
 
 DIGITAL_ENGINE = "pdfplumber"
 DIGITAL_ENGINE_VERSION = pdfplumber.__version__
@@ -34,7 +37,8 @@ def needs_deep_parse(content: bytes) -> bool:
                     return True
                 if page.find_tables():  # table-bearing → deep structure (R62)
                     return True
-    except Exception:
+    except Exception as exc:
+        log.warning("deep-parse probe failed (%s); routing to the deep path", exc)
         return True  # unreadable by the light path → let Docling try
     return False
 

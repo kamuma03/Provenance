@@ -19,7 +19,17 @@ export default function CitationPanel({ claims }: { claims: Claim[] }) {
               <span
                 key={c.chunk_id}
                 className="cite"
+                role="button"
+                tabIndex={0}
+                aria-pressed={selected?.chunk_id === c.chunk_id}
                 onClick={() => setSelected(c)}
+                onKeyDown={(e) => {
+                  // Keyboard access: the core provenance feature must not be mouse-only (L-10).
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setSelected(c);
+                  }
+                }}
                 style={{ marginRight: 10 }}
               >
                 ↳ {c.chunk_id} · p{c.page}

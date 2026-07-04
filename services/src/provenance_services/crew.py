@@ -36,6 +36,9 @@ GROUNDING_THRESHOLD = 0.6  # fraction of claim tokens that must appear in some e
 _COMPARATIVE = ("but not", "compared to", " versus ", " vs ", "difference between")
 _RELATIONAL = ("related to", "connected", "associated with", "owns", "subsidiar", "auditor of",
                "who audits", "parties to")
+# Query stopwords for the offline relevance gate. "personal" is deliberately included so a
+# query like "CEO personal home address" isn't kept relevant by the word "personal" alone — it
+# is NOT load-bearing for any specific eval case, just a common non-discriminating word (L-8).
 _STOPWORDS = {
     "the", "a", "an", "is", "are", "was", "were", "of", "to", "in", "on", "for", "and",
     "or", "what", "who", "which", "when", "where", "how", "does", "did", "do", "that",

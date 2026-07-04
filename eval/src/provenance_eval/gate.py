@@ -8,6 +8,7 @@ any is below its §9.2 fail threshold. LLM-judged RAGAS metrics run on the Spark
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -18,7 +19,17 @@ from provenance_services.detection import detect
 from .harness import EvalCase, InProcessSystem, Outcome, run_cases
 from .metrics import THRESHOLDS, groundedness, numeric_exact_match, rate
 
-DEFAULT_EVAL_SET = Path(__file__).resolve().parents[3] / "eval" / "golden" / "eval_set.yaml"
+
+def _default_eval_set() -> Path:
+    """Locate the eval set. PROVENANCE_EVAL_SET overrides; otherwise the repo-relative path
+    (which works from a source checkout — a wheel install should set the env var, L-6)."""
+    env = os.environ.get("PROVENANCE_EVAL_SET")
+    if env:
+        return Path(env)
+    return Path(__file__).resolve().parents[3] / "eval" / "golden" / "eval_set.yaml"
+
+
+DEFAULT_EVAL_SET = _default_eval_set()
 
 
 async def _build_outcomes(spec: dict) -> tuple[list[Outcome], dict]:
@@ -74,9 +85,15 @@ def main(path: Path = DEFAULT_EVAL_SET) -> int:
 
     print("=== Provenance eval gate (offline-computable metrics) ===")
     for name, value in sorted(metrics.items()):
-        th = THRESHOLDS[name]
+        th = THRESHOLDS.get(name)
+        if th is None:  # a metric without a threshold is reported but doesn't gate (no KeyError)
+            print(f"  [----] {name:20s} {value:.3f}  (no threshold — ungated)")
+            continue
         ok = "PASS" if value >= th.fail_below else "FAIL"
         print(f"  [{ok}] {name:20s} {value:.3f}  (target {th.target}, fail<{th.fail_below})")
+    # Surface any threshold that has no computed metric — drift that would silently ungate it.
+    for name in sorted(set(THRESHOLDS) - set(metrics)):
+        print(f"  [WARN] {name:20s} — configured threshold has no computed metric")
     print("  [skip] RAGAS faithfulness/relevancy/precision/recall — LLM-judged on the Spark")
 
     if failures:
@@ -89,4 +106,5 @@ def main(path: Path = DEFAULT_EVAL_SET) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # Accept an optional eval-set path argument (previously ignored, L-6).
+    sys.exit(main(Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_EVAL_SET))

@@ -7,6 +7,7 @@ unavailable (N6) so the skeleton flow still demonstrates the trace.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from datetime import UTC, datetime
@@ -29,6 +30,7 @@ def _dsn() -> str:
 class Catalog:
     def __init__(self) -> None:
         self._pool: asyncpg.Pool | None = None
+        self._lock = asyncio.Lock()
 
     async def connect(self) -> None:
         await self._ensure()
@@ -36,13 +38,19 @@ class Catalog:
     async def _ensure(self) -> None:
         """(Re)establish the pool on demand. Startup may race Postgres readiness (the gateway
         can boot first), so instead of failing permanently we lazily reconnect on the next
-        call once the DB is up — the skeleton still degrades gracefully if it never is (N6)."""
+        call once the DB is up — the skeleton still degrades gracefully if it never is (N6).
+
+        The lock prevents two concurrent first-callers from each creating a pool and leaking
+        one (review L-3); the double-check keeps the common path lock-free."""
         if self._pool is not None:
             return
-        try:
-            self._pool = await asyncpg.create_pool(_dsn(), min_size=1, max_size=5)
-        except Exception:  # pragma: no cover - DB not ready yet; retry on the next call
-            self._pool = None
+        async with self._lock:
+            if self._pool is not None:
+                return
+            try:
+                self._pool = await asyncpg.create_pool(_dsn(), min_size=1, max_size=5)
+            except Exception:  # pragma: no cover - DB not ready yet; retry on the next call
+                self._pool = None
 
     async def close(self) -> None:
         if self._pool is not None:

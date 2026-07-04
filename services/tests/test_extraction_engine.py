@@ -19,6 +19,16 @@ def test_heuristic_generic_extracts_proper_nouns() -> None:
     assert any(e.type == "Organization" for e in ents)  # Inc suffix => Organization
 
 
+def test_heuristic_generic_strips_sentence_initial_determiners() -> None:
+    # "The"/"This" at a sentence start must not become an entity, nor glue onto the real name
+    # ("The Federal Reserve" → "Federal Reserve") — review L-2.
+    ents = heuristic_generic("The Federal Reserve raised rates. This Committee met today.")
+    names = {e.canonical_name for e in ents}
+    assert "Federal Reserve" in names
+    assert "The Federal Reserve" not in names
+    assert "The" not in names and "This" not in names
+
+
 @pytest.mark.asyncio
 async def test_generic_domain_extraction_runs_without_llm() -> None:
     spec = REGISTRY["generic"]

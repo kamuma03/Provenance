@@ -31,13 +31,19 @@ LLMExtractor = Callable[[str, DomainSpec], Awaitable[dict[str, Any]]]
 
 _PROPER = re.compile(r"\b([A-Z][a-zA-Z0-9.&]+(?:\s+[A-Z][a-zA-Z0-9.&]+)*)\b")
 _ORG_SUFFIX = ("Inc", "Inc.", "Corp", "Corp.", "Ltd", "LLC", "PLC", "Co", "Co.")
+# Sentence-initial determiners get capitalized and would otherwise be captured as entities
+# ("The", "This", …) or glued to the real name ("The Federal Reserve") — strip them (L-2).
+_LEADING_DET = {"the", "this", "that", "these", "those", "a", "an"}
 
 
 def heuristic_generic(text: str) -> list[EntityCandidate]:
     """No-LLM extraction for the generic domain: proper-noun phrases as entities."""
     seen: dict[str, EntityCandidate] = {}
     for m in _PROPER.finditer(text):
-        phrase = m.group(1).strip()
+        tokens = m.group(1).strip().split()
+        if tokens and tokens[0].lower() in _LEADING_DET:
+            tokens = tokens[1:]  # drop a leading determiner
+        phrase = " ".join(tokens)
         if len(phrase) < 3 or phrase.lower() in seen:
             continue
         etype = "Organization" if phrase.split()[-1] in _ORG_SUFFIX else "Concept"
