@@ -65,5 +65,12 @@ RUN set -eu; \
 COPY --from=reranker-export /export/bge-reranker-v2-m3 /opt/models/bge-reranker-v2-m3
 
 EXPOSE 8000
+
+# Every service exposes /health on :8000 (create_app), and H-5 keeps it answerable under load,
+# so one generic liveness probe fits them all (review H-13). Uses python3 (already present) to
+# avoid adding curl to the image.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=4)" || exit 1
+
 # Default command is overridden per service in docker-compose.yml.
 CMD ["uvicorn", "provenance_services.gateway:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -58,6 +58,14 @@ docs stop describing infrastructure that doesn't exist.
 
 ---
 
+> **Status (updated):** Phase 0 ✅ and Phase 1 ✅ are implemented, tested, and green
+> (ruff + mypy + 130 passing tests + eval gate + license audit). Deferred within H-13 (Docker
+> image build can't be exercised in this environment, so these are left as low-risk follow-ups):
+> non-root container user, `uv sync --frozen` in the image, and pinning the `ghcr.io/astral-sh/uv`
+> copy source. The remaining web `npm audit` highs (`glob` dev-only, `next`/`postcss`) require a
+> breaking Next 15/16 major and are out of scope; the critical CVE is fixed by the 14.2.33 bump.
+> Phases 2–3 (Medium/Low) remain open.
+
 ## Phase 1 — Groundedness & retrieval robustness (this cycle, High severity)
 
 ### 1.1 — Per-chunk graph extraction over the whole document  `[H-1]`  — **M**
