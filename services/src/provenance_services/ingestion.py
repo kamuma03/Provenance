@@ -9,6 +9,7 @@ Gateway via NATS for catalog updates (B.4).
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -197,25 +198,43 @@ async def _publish_status(
 
 
 async def _run_saga(data: bytes, _headers: dict[str, str]) -> None:
-    job = json.loads(data or b"{}")
-    doc_id = str(job.get("document_id", "?"))
-    ctx: Ctx = {
-        "document_id": doc_id,
-        "kb_id": job.get("kb_id", "?"),
-        "content_b64": job.get("content_b64", ""),
-    }
-    with tracer("ingestion").start_as_current_span("ingestion.saga") as span:
-        ctx["trace_id"] = format(span.get_span_context().trace_id, "032x")
-        span.set_attribute("document_id", doc_id)
-        await _publish_status(doc_id, "parsing")
-        outcome = await _build_saga().run(ctx)
-        span.set_attribute("saga.status", outcome.status.value)
-        if outcome.status is SagaStatus.FAILED:
+    # Failure containment (review M-11): nothing here may escape the consumer callback, or a
+    # malformed job / status-publish error would strand the document in a non-terminal state
+    # (and, under the durable consumer, loop forever on the poison message). Everything is
+    # wrapped; a caught error is logged against the document id and best-effort published.
+    doc_id = "?"
+    try:
+        job = json.loads(data or b"{}")
+        doc_id = str(job.get("document_id", "?"))
+        ctx: Ctx = {
+            "document_id": doc_id,
+            "kb_id": job.get("kb_id", "?"),
+            "content_b64": job.get("content_b64", ""),
+        }
+        with tracer("ingestion").start_as_current_span("ingestion.saga") as span:
+            ctx["trace_id"] = format(span.get_span_context().trace_id, "032x")
+            span.set_attribute("document_id", doc_id)
+            await _publish_status(doc_id, "parsing")
+            outcome = await _build_saga().run(ctx)
+            span.set_attribute("saga.status", outcome.status.value)
+            if outcome.status is SagaStatus.FAILED:
+                await _publish_status(doc_id, "failed")
+                log.error("saga FAILED at %s for %s: %s",
+                          outcome.failed_step, doc_id, outcome.error)
+            elif outcome.status is SagaStatus.PAUSED:
+                # detect-but-confirm (R9/R55): the saga parked for confirmation. Report it so
+                # the document isn't silently stuck with no status. The interactive resume flow
+                # is deferred — see docs/plans/remediation-plan.md (M-3).
+                await _publish_status(doc_id, "awaiting_confirm")
+                log.info("saga PAUSED at %s for %s (awaiting confirmation)",
+                         outcome.failed_step, doc_id)
+            elif outcome.status is SagaStatus.DONE:
+                await _publish_status(doc_id, "done", _provenance(ctx))
+                log.info("saga done for document_id=%s (domain=%s)", doc_id, ctx.get("domain"))
+    except Exception:
+        log.exception("ingestion callback error for document_id=%s", doc_id)
+        with contextlib.suppress(Exception):
             await _publish_status(doc_id, "failed")
-            log.error("saga FAILED at %s for %s: %s", outcome.failed_step, doc_id, outcome.error)
-        elif outcome.status is SagaStatus.DONE:
-            await _publish_status(doc_id, "done", _provenance(ctx))
-            log.info("saga done for document_id=%s (domain=%s)", doc_id, ctx.get("domain"))
 
 
 async def _on_startup() -> None:

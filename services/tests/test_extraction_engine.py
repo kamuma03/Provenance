@@ -76,6 +76,27 @@ async def test_make_llm_extractor_parses_json_and_drops_off_schema() -> None:
     assert [e.canonical_name for e in result.entities] == ["Apple Inc."]
 
 
+@pytest.mark.asyncio
+async def test_malformed_llm_items_are_dropped_not_raised() -> None:
+    # One malformed entity dict (and a non-dict) must not 500 /extract and fail the whole
+    # document — repair-by-dropping extends to shape (review M-8).
+    spec = REGISTRY["sec_financial"]
+
+    async def fake_llm(_text: str, _spec: DomainSpec) -> dict:
+        return {
+            "entities": [
+                {"type": "Company", "canonical_name": "Apple Inc."},  # valid
+                {"type": "Company"},                                   # missing canonical_name
+                "not-a-dict",                                          # wrong shape entirely
+            ],
+            "relations": [{"subject": "Apple Inc.", "predicate": "AUDITED_BY"}],  # missing object
+        }
+
+    result = await extract("...", spec, llm=fake_llm)
+    assert [e.canonical_name for e in result.entities] == ["Apple Inc."]  # only the valid one
+    assert result.relations == []  # the malformed relation was dropped, no exception
+
+
 def test_registry_tiers_intact() -> None:
     # Sanity: extraction respects the registry shape it depends on.
     assert REGISTRY["sec_financial"].tier is DomainTier.BUILT

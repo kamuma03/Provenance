@@ -7,10 +7,13 @@ unavailable (N6) so the skeleton flow still demonstrates the trace.
 
 from __future__ import annotations
 
+import logging
 import os
 from datetime import UTC, datetime
 
 import asyncpg
+
+log = logging.getLogger("catalog")
 
 
 def _dsn() -> str:
@@ -79,6 +82,9 @@ class Catalog:
         """
         await self._ensure()
         if self._pool is None:
+            # N6 graceful degradation, but not silent: the gateway would otherwise return a
+            # doc id and enqueue a saga whose catalog row never existed (review M-12).
+            log.warning("catalog unavailable — document %s not persisted", doc_id)
             return None
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(

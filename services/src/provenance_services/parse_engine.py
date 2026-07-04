@@ -9,6 +9,7 @@ PaddleOCR, CPU, bbox-preserving — see ocr_engine.py); Docling is the richer Sp
 from __future__ import annotations
 
 import io
+from collections import Counter
 
 import pdfplumber
 from provenance_contracts import BBox, ElementType, ParsedElement, ParseMethod, ParseResult
@@ -116,8 +117,11 @@ def parse_pdf_bytes(content: bytes, *, enable_ocr: bool = True) -> ParseResult:
             )
         )
 
-    dominant = ParseMethod.OCR if (ocr_used and not page_methods.get(0) == ParseMethod.TEXT_LAYER) \
-        else ParseMethod.TEXT_LAYER
+    # Dominant method = the majority across ALL pages, not whatever page 0 happened to be
+    # (a mixed doc whose first page has a text layer but whose bulk is scanned was mislabeled
+    # text_layer — review M-13).
+    methods = list(page_methods.values())
+    dominant = Counter(methods).most_common(1)[0][0] if methods else ParseMethod.TEXT_LAYER
     engine = f"{DIGITAL_ENGINE}+{OCR_ENGINE_ID}" if ocr_used else DIGITAL_ENGINE
     return ParseResult(
         elements=elements,

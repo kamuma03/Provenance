@@ -6,6 +6,7 @@ stable ids (merging co-referents), and writes typed nodes/edges to Kuzu with pro
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 
@@ -16,6 +17,8 @@ from provenance_service import create_app, tracer
 
 from .graph_store import GraphStore
 from .resolver import EntityResolver, normalize_name
+
+log = logging.getLogger("graph")
 
 _KUZU_PATH = os.environ.get("KUZU_DB_PATH", "/tmp/provenance-kuzu")
 _store: GraphStore | None = None
@@ -55,20 +58,35 @@ def _write_sync(
     with _access_lock:
         res = _resolver.resolve(kb_id, candidates)
         store.upsert_entities(res.entities)
+
+        def _endpoint(name: object) -> str | None:
+            # Resolve a relation endpoint by exact name, then by normalized form, so a drifted
+            # surface form doesn't silently drop the edge (review M-7).
+            if not isinstance(name, str):
+                return None
+            return res.name_to_id.get(name) or res.name_to_id.get(normalize_name(name))
+
         written = 0
+        dropped = 0
         for r in relations:
-            subject, obj = r.get("subject"), r.get("object")
-            sid = res.name_to_id.get(subject) if isinstance(subject, str) else None
-            oid = res.name_to_id.get(obj) if isinstance(obj, str) else None
+            sid, oid = _endpoint(r.get("subject")), _endpoint(r.get("object"))
             if sid and oid:
                 store.write_relation(
                     sid, str(r.get("predicate", "RELATES_TO")), oid,
                     kb_id=kb_id, document_id=document_id, trace_id=trace_id,
                 )
                 written += 1
+            else:
+                dropped += 1
+        if dropped:
+            log.warning(
+                "graph.write dropped %d relation(s) with unresolved endpoints (doc=%s)",
+                dropped, document_id,
+            )
         return {
             "entities": len(res.entities),
             "relations": written,
+            "relations_dropped": dropped,
             "merged": res.merged,
             "kb_entity_count": store.entity_count(kb_id),
         }

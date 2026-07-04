@@ -95,12 +95,16 @@ def parse_pdf_bytes_docling(content: bytes) -> ParseResult:
         )
         order += 1
 
-    n_pages = doc.num_pages() if hasattr(doc, "num_pages") else 1
+    n_pages = (doc.num_pages() if hasattr(doc, "num_pages") else 1) or 1
+    # Docling decides text-layer vs OCR internally per page and doesn't surface which was used,
+    # so we record its unified pipeline method for every page rather than leaving page_methods
+    # empty (which read as "no provenance"). Honest within what the backend exposes (R63/M-13).
+    page_methods = {p: ParseMethod.TEXT_LAYER for p in range(n_pages)}
     return ParseResult(
         elements=elements,
-        pages=n_pages or 1,
-        parse_method=ParseMethod.TEXT_LAYER,  # Docling handles text-layer vs OCR internally
-        page_methods={},
+        pages=n_pages,
+        parse_method=ParseMethod.TEXT_LAYER,
+        page_methods=page_methods,
         engine=DOCLING_ENGINE,
         engine_version="docling",
     )

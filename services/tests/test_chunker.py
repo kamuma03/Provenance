@@ -49,3 +49,22 @@ def test_page_boundary_splits_chunks() -> None:
     chunks = chunk_elements(els, document_id="d1", kb_id="kb1", target_chars=10_000)
     pages = {c.page for c in chunks}
     assert pages == {0, 1}  # never merged across pages
+
+
+def test_overlap_carry_does_not_emit_duplicate_tail_at_boundaries() -> None:
+    # With overlap enabled, a size-flush keeps a small last element as an overlap tail. At the
+    # following page boundary that carried tail must NOT be re-emitted as its own chunk — that
+    # duplicated the tail already present in the previous chunk (review M-9).
+    els = [
+        _text(0, 0, "x" * 96),                # nearly fills the 100-char target
+        _text(1, 0, "tail"),                  # tips over target; small enough to be carried
+        _text(2, 1, "charlie on page two"),   # page boundary forces a flush of the carried tail
+    ]
+    chunks = chunk_elements(
+        els, document_id="d1", kb_id="kb1", target_chars=100, overlap_chars=50
+    )
+    # The first chunk already contains "tail"; no later chunk may consist solely of it.
+    assert "tail" in chunks[0].text
+    assert all(c.text != "tail" for c in chunks[1:])  # the carried tail is not duplicated
+    assert [c.id for c in chunks] == [f"d1:c{i}" for i in range(len(chunks))]  # contiguous ids
+    assert any("charlie on page two" in c.text for c in chunks)  # page-two content survives

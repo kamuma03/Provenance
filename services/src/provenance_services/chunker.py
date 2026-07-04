@@ -35,9 +35,18 @@ def chunk_elements(
     """Group Parse elements into Chunks. Tables stay whole (R68)."""
     chunks: list[Chunk] = []
     buffer: list[ParsedElement] = []  # accumulating prose elements (same page)
+    carried_only = False  # buffer currently holds ONLY an overlap tail carried from last flush
 
     def flush(carry_overlap: bool = False) -> None:
+        nonlocal carried_only
         if not buffer:
+            return
+        # A buffer that is nothing but the carried-over overlap tail (no new content appended
+        # since) would duplicate the previous chunk's tail as its own chunk — a real problem at
+        # page/document boundaries. Drop it instead of emitting a duplicate (review M-9).
+        if carried_only and not carry_overlap:
+            buffer.clear()
+            carried_only = False
             return
         text = "\n".join(e.text for e in buffer)
         bbox = _union_bbox(buffer)
@@ -59,6 +68,7 @@ def chunk_elements(
         tail = buffer[-1]
         keep_tail = carry_overlap and overlap_chars > 0 and len(tail.text) <= overlap_chars
         buffer[:] = [tail] if keep_tail else []
+        carried_only = keep_tail
 
     for el in sorted(elements, key=lambda e: e.reading_order):
         if el.element_type is ElementType.TABLE:
@@ -82,6 +92,7 @@ def chunk_elements(
         if buffer and el.page != buffer[-1].page:
             flush()
         buffer.append(el)
+        carried_only = False  # real new content in the buffer now
         if sum(len(e.text) for e in buffer) >= target_chars:
             flush(carry_overlap=True)
 

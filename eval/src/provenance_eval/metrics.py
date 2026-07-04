@@ -51,15 +51,28 @@ def _sentences(text: str) -> list[str]:
     return [s.strip() for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s.strip()]
 
 
-def _norm_num(s: str) -> str:
-    return re.sub(r"[,$\s]", "", s).lower()
+def _num_tokens(s: str) -> list[str]:
+    """Tokenize for numeric matching: drop currency/commas, split on whitespace, strip edge
+    punctuation. Keeps token boundaries so a number can't match inside a larger one."""
+    s = re.sub(r"[,$]", "", s.lower())
+    return [t for t in (w.strip(".,;:!?()%") for w in s.split()) if t]
 
 
 def numeric_exact_match(expected: str, answer: Answer) -> bool:
-    """R42: the expected numeric span appears verbatim (normalized) in the answer."""
+    """R42: the expected numeric span appears in the answer as a whole-token subsequence.
+
+    Boundary-aware, not substring: the old whitespace-stripping match let "14.2 billion"
+    satisfy an expected "4.2 billion" (order-of-magnitude hallucination — exactly R42's
+    target class). We require the expected tokens to appear contiguously with exact token
+    equality (review M-2)."""
     if answer.refused:
         return False
-    return _norm_num(expected) in _norm_num(answer.text)
+    exp = _num_tokens(expected)
+    if not exp:
+        return False
+    ans = _num_tokens(answer.text)
+    n = len(exp)
+    return any(ans[i:i + n] == exp for i in range(len(ans) - n + 1))
 
 
 def rate(flags: list[bool]) -> float:

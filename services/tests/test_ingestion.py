@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import pytest
 from provenance_contracts import BBox, Chunk
+from provenance_services import ingestion
 from provenance_services.ingestion import _EXTRACT_WINDOW_CHARS, _windows
 
 
@@ -55,3 +57,22 @@ def test_provenance_payload_carries_trace_id_and_drops_nulls() -> None:
     assert prov["parse_method"] == "text_layer"
     assert prov["trace_id"] == "abc123"  # R56 / H-9
     assert "ocr_engine" not in prov  # None-valued fields dropped
+
+
+@pytest.mark.asyncio
+async def test_malformed_job_does_not_escape_the_consumer_callback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A malformed job must not raise out of the NATS callback (which would loop forever on the
+    # durable consumer) — it is contained, logged, and best-effort published failed (review M-11).
+    published: list[tuple[str, str]] = []
+
+    async def fake_publish(subject, payload):  # type: ignore[no-untyped-def]
+        import json
+        evt = json.loads(payload)
+        published.append((evt["document_id"], evt["status"]))
+
+    monkeypatch.setattr(ingestion.bus, "publish", fake_publish)
+
+    await ingestion._run_saga(b"this is not json{{{", {})  # must not raise
+    assert ("?", "failed") in published  # contained and reported

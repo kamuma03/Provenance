@@ -12,6 +12,7 @@ Both return typed elements with page + bbox + reading order and record provenanc
 from __future__ import annotations
 
 import base64
+import logging
 import os
 from typing import cast
 
@@ -20,6 +21,7 @@ from fastapi import Request
 from provenance_contracts import ParseResult
 from provenance_service import create_app, tracer
 
+log = logging.getLogger("parse")
 app = create_app("parse")
 
 
@@ -33,7 +35,10 @@ def parse_document(content: bytes) -> ParseResult:
         try:
             from .docling_parser import parse_pdf_bytes_docling
             return parse_pdf_bytes_docling(content)
-        except Exception:  # docling unavailable (light deployment) → fall back
+        except Exception as exc:
+            # Docling unavailable (light deployment) or failed → fall back to pdfplumber, but
+            # log it: a silent downgrade of the deep path shouldn't be invisible (review M-12).
+            log.warning("docling parse failed, falling back to pdfplumber: %s", exc)
             return parse_pdf_bytes(content)
     return parse_pdf_bytes(content)
 

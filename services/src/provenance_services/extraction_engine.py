@@ -9,6 +9,7 @@ extraction uses an injectable LLM extractor (the Spark path), validated the same
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
@@ -22,6 +23,7 @@ from provenance_contracts import (
 )
 from provenance_service import LLMClient
 
+log = logging.getLogger("extraction")
 SCHEMA_VERSION = "v1"
 
 # Async; returns raw {"entities": [{"type","canonical_name"}], "relations": [...]}.
@@ -61,14 +63,33 @@ def validate_against_schema(
     return kept, kept_rels
 
 
+def _coerce(items: object, model: type[Any], kind: str) -> list[Any]:
+    """Build contract objects from raw LLM items, dropping (and logging) malformed ones.
+
+    Repair-by-dropping extends to *shape*, not just off-schema types: a single bad dict must
+    not 500 the whole /extract and fail the document (review M-8)."""
+    if not isinstance(items, list):
+        return []
+    out: list[Any] = []
+    for item in items:
+        if not isinstance(item, dict):
+            log.warning("dropping non-dict %s candidate: %r", kind, item)
+            continue
+        try:
+            out.append(model(**item))
+        except Exception as exc:  # noqa: BLE001 - one malformed item must not fail the batch
+            log.warning("dropping malformed %s candidate %r: %s", kind, item, exc)
+    return out
+
+
 async def extract(
     text: str, spec: DomainSpec, llm: LLMExtractor | None = None
 ) -> ExtractionResult:
     """Extract typed entities/relations, validated against the domain schema."""
     if llm is not None:
         raw = await llm(text, spec)
-        entities = [EntityCandidate(**e) for e in raw.get("entities", [])]
-        relations = [RelationCandidate(**r) for r in raw.get("relations", [])]
+        entities = _coerce(raw.get("entities", []), EntityCandidate, "entity")
+        relations = _coerce(raw.get("relations", []), RelationCandidate, "relation")
     elif spec.id == GENERIC_FALLBACK_ID:
         entities, relations = heuristic_generic(text), []
     else:
@@ -98,7 +119,10 @@ def make_llm_extractor(client: LLMClient) -> LLMExtractor:
         raw = await client.complete(system, text)
         try:
             return cast("dict[str, Any]", json.loads(raw[raw.index("{"): raw.rindex("}") + 1]))
-        except Exception:
+        except Exception as exc:
+            # Garbled JSON must not silently yield an empty graph with no signal (review M-8).
+            log.warning("extraction LLM returned unparseable JSON (%s); yielding empty: %.120r",
+                        exc, raw)
             return {"entities": [], "relations": []}
 
     return _extract
