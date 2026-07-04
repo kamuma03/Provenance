@@ -69,17 +69,31 @@ class Catalog:
 
     async def create_document(
         self, doc_id: str, kb_id: str, source: str, content_type: str, content_hash: str
-    ) -> None:
+    ) -> tuple[str, bool] | None:
+        """Insert a queued Document idempotently (N5).
+
+        Returns ``(effective_id, created)``: on a duplicate ``(kb_id, content_hash)`` the
+        row is not re-inserted and ``effective_id`` is the *existing* document's id with
+        ``created=False`` — so the caller can return that id and skip re-running the saga
+        instead of minting a dangling id (review H-4). ``None`` when the DB is unavailable.
+        """
         await self._ensure()
         if self._pool is None:
-            return
+            return None
         async with self._pool.acquire() as conn:
-            await conn.execute(
+            row = await conn.fetchrow(
                 "INSERT INTO document (id, kb_id, source, content_type, content_hash, status) "
                 "VALUES ($1, $2, $3, $4, $5, 'queued') "
-                "ON CONFLICT (kb_id, content_hash) DO NOTHING",
+                "ON CONFLICT (kb_id, content_hash) DO NOTHING RETURNING id",
                 doc_id, kb_id, source, content_type, content_hash,
             )
+            if row is not None:
+                return doc_id, True
+            existing = await conn.fetchrow(
+                "SELECT id FROM document WHERE kb_id = $1 AND content_hash = $2",
+                kb_id, content_hash,
+            )
+            return (str(existing["id"]), False) if existing else (doc_id, True)
 
     async def update_status(self, doc_id: str, status: str) -> None:
         await self._ensure()
@@ -87,6 +101,29 @@ class Catalog:
             return
         async with self._pool.acquire() as conn:
             await conn.execute("UPDATE document SET status = $2 WHERE id = $1", doc_id, status)
+
+    async def record_provenance(
+        self, doc_id: str, status: str, provenance: dict[str, object]
+    ) -> None:
+        """Persist the terminal status plus how the document was processed — domain,
+        confidence, schema version, parse method, OCR engine, and the correlating
+        trace_id (R56's acceptance criterion, review H-9)."""
+        await self._ensure()
+        if self._pool is None:
+            return
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE document SET status = $2, detected_domain = $3, "
+                "detection_confidence = $4, schema_version = $5, parse_method = $6, "
+                "ocr_engine = $7, trace_id = $8 WHERE id = $1",
+                doc_id, status,
+                provenance.get("detected_domain"),
+                provenance.get("detection_confidence"),
+                provenance.get("schema_version"),
+                provenance.get("parse_method"),
+                provenance.get("ocr_engine"),
+                provenance.get("trace_id"),
+            )
 
     async def get_document(self, doc_id: str) -> dict[str, str] | None:
         await self._ensure()

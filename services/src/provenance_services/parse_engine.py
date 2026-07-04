@@ -38,10 +38,20 @@ def needs_deep_parse(content: bytes) -> bool:
     return False
 
 
-def _center_in(bbox: tuple[float, float, float, float], top: float, bottom: float) -> bool:
-    """Is a line's vertical center inside a table's vertical span?"""
-    cy = (top + bottom) / 2
-    return bbox[1] <= cy <= bbox[3]
+def _inside_table(
+    line: tuple[float, float, float, float], span: tuple[float, float, float, float]
+) -> bool:
+    """Is a text line's center inside a table's bbox on BOTH axes?
+
+    Vertical-only overlap wrongly deletes prose sitting beside a table (e.g. left-column
+    narrative next to a right-column table in a financial filing). Require horizontal
+    containment too so only genuinely-in-table lines are dropped (review H-11).
+    """
+    lx0, ltop, lx1, lbottom = line
+    tx0, ttop, tx1, tbottom = span
+    cx = (lx0 + lx1) / 2
+    cy = (ltop + lbottom) / 2
+    return tx0 <= cx <= tx1 and ttop <= cy <= tbottom
 
 
 def parse_pdf_bytes(content: bytes, *, enable_ocr: bool = True) -> ParseResult:
@@ -73,13 +83,13 @@ def parse_pdf_bytes(content: bytes, *, enable_ocr: bool = True) -> ParseResult:
             # Text lines outside any table bbox (avoid duplicating table text).
             lines = page.extract_text_lines() if hasattr(page, "extract_text_lines") else []
             for ln in lines:
-                top, bottom = float(ln["top"]), float(ln["bottom"])
-                if any(_center_in(span, top, bottom) for span in table_spans):
+                x0, top = float(ln["x0"]), float(ln["top"])
+                x1, bottom = float(ln["x1"]), float(ln["bottom"])
+                if any(_inside_table((x0, top, x1, bottom), span) for span in table_spans):
                     continue
                 raw.append(
-                    (pidx, top, float(ln["x0"]), ElementType.TEXT, ln["text"],
-                     BBox(page=pidx, x0=float(ln["x0"]), y0=top,
-                          x1=float(ln["x1"]), y1=bottom))
+                    (pidx, top, x0, ElementType.TEXT, ln["text"],
+                     BBox(page=pidx, x0=x0, y0=top, x1=x1, y1=bottom))
                 )
 
             page_methods[pidx] = (

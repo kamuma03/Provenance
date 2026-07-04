@@ -61,6 +61,19 @@ def test_digital_first_parse_yields_geometry_and_provenance() -> None:
     assert "Risk Factors" in text_blob
 
 
+def test_prose_beside_a_table_is_not_discarded() -> None:
+    # A line sharing a table's vertical band but sitting in a different column must survive;
+    # only lines horizontally inside the table are dropped as duplicates (review H-11).
+    from provenance_services.parse_engine import _inside_table
+
+    table = (300.0, 100.0, 560.0, 200.0)  # right-column table (x 300..560, y 100..200)
+    left_prose = (40.0, 120.0, 260.0, 135.0)  # same vertical band, left column
+    inside_cell = (320.0, 150.0, 400.0, 165.0)  # genuinely inside the table
+
+    assert _inside_table(left_prose, table) is False  # kept — the H-11 regression
+    assert _inside_table(inside_cell, table) is True  # dropped as table-internal
+
+
 def test_table_kept_as_coherent_unit() -> None:
     from provenance_services.parse_engine import parse_pdf_bytes
 

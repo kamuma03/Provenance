@@ -65,3 +65,33 @@ async def test_empty_corpus_yields_empty_evidence() -> None:
     ev = await retrieve("kb1", "q", _deps(hits=[], linked=[], expanded=[]))
     assert ev.chunks == []
     assert ev.graph_expanded is False  # honest: nothing retrieved, nothing fabricated
+
+
+@pytest.mark.asyncio
+async def test_graph_outage_degrades_to_vector_floor() -> None:
+    # A Graph-service failure must not fail the query — vector evidence still stands (H-6).
+    hits = [_hit("c1", "alpha", 0.9)]
+    deps = _deps(hits=hits, linked=[], expanded=[])
+
+    async def boom(_kb, _t):
+        raise RuntimeError("graph down")
+
+    deps.link = boom
+    ev = await retrieve("kb1", "q", deps)
+    assert [c.chunk_id for c in ev.chunks] == ["c1"]
+    assert ev.entity_ids == []
+    assert ev.graph_expanded is False
+
+
+@pytest.mark.asyncio
+async def test_rerank_failure_keeps_hybrid_hits() -> None:
+    # A rerank failure must keep the hybrid fusion order, not discard the hits (H-6).
+    hits = [_hit("c1", "alpha", 0.9), _hit("c2", "beta", 0.5)]
+    deps = _deps(hits=hits, linked=[], expanded=[])
+
+    async def boom(_q, _hits):
+        raise RuntimeError("reranker down")
+
+    deps.rerank = boom
+    ev = await retrieve("kb1", "q", deps)
+    assert [c.chunk_id for c in ev.chunks] == ["c1", "c2"]  # hybrid order preserved

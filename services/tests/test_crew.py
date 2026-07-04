@@ -191,3 +191,26 @@ async def test_crew_strict_refusal_on_exhaustion() -> None:
     ans = await run_crew("q", "kb1", retrieve, synthesizer=AlwaysUngrounded(), max_iterations=2)
     assert ans.refused is True  # never releases ungrounded content (R32)
     assert "ungrounded" in (ans.refusal_reason or "")
+
+
+@pytest.mark.asyncio
+async def test_crew_revision_feeds_verdict_back_and_stops_on_no_progress() -> None:
+    # The Critic's ungrounded verdict must reach the next synthesis, and an unchanged replay
+    # must short-circuit to refusal rather than run out the whole loop (review M-1).
+    async def retrieve(_kb: str, q: str) -> EvidenceSet:
+        return _evidence(q, [_chunk("c1", "the auditor is Ernst and Young")])
+
+    seen_prev: list[list[str]] = []
+
+    class RecordingSynth(Synthesizer):
+        async def synthesize(self, plan, evidences, prev=None):  # type: ignore[no-untyped-def]
+            seen_prev.append(list(prev.ungrounded_claims) if prev else [])
+            return Answer(text="fabricated", claims=[Claim(text="fabricated unrelated claim")])
+
+    ans = await run_crew("q", "kb1", retrieve, synthesizer=RecordingSynth(), max_iterations=5)
+    assert ans.refused is True
+    # 1st call: no prior verdict; 2nd call: receives the ungrounded feedback; then no-progress
+    # (identical text) stops the loop — so only two synthesis attempts, not five.
+    assert seen_prev[0] == []
+    assert seen_prev[1] == ["fabricated unrelated claim"]
+    assert len(seen_prev) == 2

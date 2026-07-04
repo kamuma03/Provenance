@@ -10,6 +10,7 @@ hybrid candidates in the retrieval core.
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Protocol
 
@@ -114,5 +115,11 @@ def get_reranker() -> Reranker:
             pass
     try:
         return CrossEncoderReranker(model_name)
-    except Exception:  # pragma: no cover - offline => lexical fallback
+    except Exception as exc:  # pragma: no cover - degrade to lexical, but make it visible
+        # Unlike hash embeddings, lexical reranking is a legitimate (weaker) signal and a
+        # rerank outage already degrades gracefully downstream (H-6) — so we keep serving,
+        # but a silent swap in production must not go unlogged (review H-7).
+        logging.getLogger("reranker").error(
+            "cross-encoder %r failed to load; falling back to lexical rerank: %s", model_name, exc
+        )
         return LexicalReranker()

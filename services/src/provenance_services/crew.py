@@ -135,6 +135,11 @@ class Synthesizer:
         self, plan: Plan, evidences: list[EvidenceSet], prev: Verdict | None = None
     ) -> Answer:
         chunks = self._select_chunks(plan, evidences)
+        if prev is not None and prev.ungrounded_claims:
+            # Revision feedback (R32): drop the evidence the Critic could not ground so the
+            # next attempt is narrower, not a byte-identical replay (review M-1).
+            ungrounded = set(prev.ungrounded_claims)
+            chunks = [c for c in chunks if c.text not in ungrounded]
         if not chunks:
             return Answer(
                 text="The documents do not support an answer to this question.",
@@ -148,7 +153,7 @@ class Synthesizer:
         ]
         text = " ".join(c.text for c in claims)
         if self._llm is not None:
-            llm_text = await self._llm_text(plan, chunks)
+            llm_text = await self._llm_text(plan, chunks, prev)
             if llm_text:
                 # The user reads the LLM prose, so the Critic must verify *that* — not the
                 # chunk echoes above. Decompose the released text into atomic claims and cite
@@ -161,11 +166,18 @@ class Synthesizer:
                 claims = decomposed or claims
         return Answer(text=text, claims=claims)
 
-    async def _llm_text(self, plan: Plan, chunks: list[ScoredChunk]) -> str | None:
+    async def _llm_text(
+        self, plan: Plan, chunks: list[ScoredChunk], prev: Verdict | None = None
+    ) -> str | None:
         system = (
             "Answer the question using ONLY the evidence provided. Be concise. Do not add "
             "facts that are not in the evidence."
         )
+        if prev is not None and prev.ungrounded_claims:
+            system += (
+                " The previous attempt asserted statements the evidence did not support; "
+                "do not repeat them: " + " | ".join(prev.ungrounded_claims)
+            )
         question = " ".join(sq.text for sq in plan.subqueries)
         evidence = "\n".join(f"- {c.text}" for c in chunks)
         try:
@@ -267,6 +279,7 @@ async def run_crew(
     evidences = [await retrieve_fn(kb_id, sq.text) for sq in plan.subqueries]
 
     verdict: Verdict | None = None
+    last_text: str | None = None
     for _ in range(max_iterations):
         answer = await synthesizer.synthesize(plan, evidences, verdict)
         if answer.refused:
@@ -276,6 +289,11 @@ async def run_crew(
             for claim in answer.claims:
                 claim.grounded = True
             return answer
+        # No-progress guard: a revision that reproduced the same text cannot converge, so
+        # stop early and refuse rather than burning the remaining iterations (review M-1).
+        if answer.text == last_text:
+            break
+        last_text = answer.text
 
     # Strict whole-answer refusal on exhaustion (R32): never release ungrounded content.
     return Answer(

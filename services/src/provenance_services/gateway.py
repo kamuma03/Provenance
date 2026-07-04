@@ -8,6 +8,7 @@ status transitions to the catalog (B.4). Returns 202 quickly on the async ingest
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import json
 import uuid
@@ -35,8 +36,14 @@ STATUS_SUBJECT = "ingest.status"
 
 async def _on_status(data: bytes, _headers: dict[str, str]) -> None:
     evt = json.loads(data or b"{}")
-    if evt.get("document_id") and evt.get("status"):
-        await catalog.update_status(evt["document_id"], evt["status"])
+    doc_id, status = evt.get("document_id"), evt.get("status")
+    if not (doc_id and status):
+        return
+    provenance = evt.get("provenance")
+    if provenance:  # terminal 'done' carries how the document was processed (R56, H-9)
+        await catalog.record_provenance(doc_id, status, provenance)
+    else:
+        await catalog.update_status(doc_id, status)
 
 
 async def _on_startup() -> None:
@@ -96,11 +103,23 @@ async def upload_document(kb_id: str, req: Request) -> JSONResponse:
     content_b64 = body.get("content_b64")
     if content_b64 is None:
         content_b64 = base64.b64encode((body.get("content") or source).encode()).decode()
-    content_hash = hashlib.sha256(base64.b64decode(content_b64)).hexdigest()  # idempotency (N5)
+    try:
+        raw = base64.b64decode(content_b64, validate=True)
+    except (binascii.Error, ValueError):
+        return JSONResponse(status_code=400, content={"error": "content_b64 is not valid base64"})
+    content_hash = hashlib.sha256(raw).hexdigest()  # idempotency key (N5)
     with tracer("gateway").start_as_current_span("gateway.upload"):
-        await catalog.create_document(
+        result = await catalog.create_document(
             doc_id, kb_id, source, "application/octet-stream", content_hash
         )
+        if result is not None:
+            doc_id, created = result
+            if not created:
+                # Idempotent re-upload (e.g. a retry after a 202 timeout): return the existing
+                # document and do NOT re-run the saga, which would duplicate chunks (H-4).
+                return JSONResponse(
+                    status_code=200, content={"document_id": doc_id, "status": "duplicate"}
+                )
         job = json.dumps(
             {"document_id": doc_id, "kb_id": kb_id, "content_b64": content_b64, "source": source}
         ).encode()
