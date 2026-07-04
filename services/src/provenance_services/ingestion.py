@@ -38,9 +38,31 @@ INGEST_STREAM = "INGEST"
 # human confirmation, pause the saga instead of auto-proceeding. Off by default (auto-confirm)
 # so existing behavior is unchanged; set REQUIRE_DOMAIN_CONFIRM=1 to require confirmation.
 _REQUIRE_CONFIRM = os.environ.get("REQUIRE_DOMAIN_CONFIRM", "").lower() in ("1", "true", "yes")
-# Paused jobs held until a /confirm arrives. In-memory for v1 — a restart loses them and the
-# user re-uploads; a durable store (JetStream KV) is the next step.
+# Paused jobs held until a /confirm arrives. Durable via a JetStream KV bucket when available
+# (survives an ingestion restart, review M-3); falls back to this in-memory dict on a server
+# without JetStream (tests / air-gap).
 _paused_jobs: dict[str, dict[str, object]] = {}
+_PAUSED_BUCKET = "PAUSED_JOBS"
+_paused_kv: object | None = None
+
+
+async def _store_paused(doc_id: str, job: dict[str, object]) -> None:
+    if _paused_kv is not None:
+        await _paused_kv.put(doc_id, json.dumps(job).encode())  # type: ignore[attr-defined]
+    else:
+        _paused_jobs[doc_id] = job
+
+
+async def _pop_paused(doc_id: str) -> dict[str, object] | None:
+    if _paused_kv is not None:
+        try:
+            entry = await _paused_kv.get(doc_id)  # type: ignore[attr-defined]
+        except Exception:
+            return None
+        with contextlib.suppress(Exception):
+            await _paused_kv.delete(doc_id)  # type: ignore[attr-defined]
+        return cast("dict[str, object]", json.loads(entry.value))
+    return _paused_jobs.pop(doc_id, None)
 
 # Domain detection needs only a sample; extraction must cover the WHOLE document, batched
 # into windows through the cheap LLM tier so entities/relations past page ~2 reach the graph
@@ -238,7 +260,7 @@ async def _run_saga(data: bytes, _headers: dict[str, str]) -> None:
                 # detect-but-confirm (R9/R55): the saga parked for confirmation. Hold the job so
                 # /confirm can resume it, and report the status so the document isn't silently
                 # stuck (review M-3).
-                _paused_jobs[doc_id] = job
+                await _store_paused(doc_id, job)
                 await _publish_status(doc_id, "awaiting_confirm")
                 log.info("saga PAUSED at %s for %s (awaiting confirmation)",
                          outcome.failed_step, doc_id)
@@ -256,9 +278,9 @@ async def _on_confirm(data: bytes, _headers: dict[str, str]) -> None:
     try:
         evt = json.loads(data or b"{}")
         doc_id = str(evt.get("document_id", ""))
-        job = _paused_jobs.pop(doc_id, None)
+        job = await _pop_paused(doc_id)
         if job is None:
-            log.warning("confirm for %s but no paused job is held (restarted?)", doc_id)
+            log.warning("confirm for %s but no paused job is held", doc_id)
             return
         await _run_saga(json.dumps({**job, "confirmed": True}).encode(), {})
     except Exception:
@@ -266,7 +288,9 @@ async def _on_confirm(data: bytes, _headers: dict[str, str]) -> None:
 
 
 async def _on_startup() -> None:
+    global _paused_kv
     await bus.connect()
+    _paused_kv = await bus.kv_open(_PAUSED_BUCKET)  # durable paused-job store (M-3)
     # Durable consumer: ack only after the saga finishes, so an ingestion crash mid-saga
     # redelivers the job instead of stranding the document at queued/parsing (H-3).
     await bus.ensure_stream(INGEST_STREAM, [INGEST_SUBJECT])

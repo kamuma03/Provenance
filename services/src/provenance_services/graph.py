@@ -11,14 +11,36 @@ import os
 import threading
 
 import anyio
-from fastapi import Request
 from provenance_contracts import EntityCandidate
 from provenance_service import create_app, tracer
+from pydantic import BaseModel, Field
 
 from .graph_store import GraphStore
 from .resolver import EntityResolver, normalize_name
 
 log = logging.getLogger("graph")
+
+
+# Typed internal request bodies (N9, review M-5).
+class WriteRequest(BaseModel):
+    kb_id: str = "default"
+    document_id: str = "?"
+    trace_id: str | None = None
+    entities: list[EntityCandidate] = Field(default_factory=list)
+    relations: list[dict[str, object]] = Field(default_factory=list)
+
+
+class DeleteRequest(BaseModel):
+    document_id: str = ""
+
+
+class LinkRequest(BaseModel):
+    kb_id: str = "default"
+    text: str = ""
+
+
+class ExpandRequest(BaseModel):
+    entity_id: str = ""
 
 _KUZU_PATH = os.environ.get("KUZU_DB_PATH", "/tmp/provenance-kuzu")
 _store: GraphStore | None = None
@@ -96,18 +118,12 @@ def _write_sync(
 
 
 @app.post("/write", tags=["graph"])
-async def write(req: Request) -> dict[str, object]:
+async def write(body: WriteRequest) -> dict[str, object]:
     """Resolve candidates (R18) and write typed nodes/edges with provenance (R22/R56)."""
-    body = await req.json()
-    kb_id = body.get("kb_id", "default")
-    document_id = body.get("document_id", "?")
-    trace_id = body.get("trace_id")
-    candidates = [EntityCandidate(**e) for e in body.get("entities", [])]
-    relations = body.get("relations", [])
-
     with tracer("graph").start_as_current_span("graph.write") as span:
         result = await anyio.to_thread.run_sync(
-            _write_sync, kb_id, document_id, trace_id, candidates, relations
+            _write_sync, body.kb_id, body.document_id, body.trace_id,
+            body.entities, body.relations,
         )
         span.set_attribute("graph.entities", result["entities"])
         span.set_attribute("graph.relations", result["relations"])
@@ -142,13 +158,10 @@ def _link_sync(kb_id: str, text: str) -> list[str]:
 
 
 @app.post("/link", tags=["graph"])
-async def link(req: Request) -> dict[str, list[str]]:
+async def link(body: LinkRequest) -> dict[str, list[str]]:
     """Query-time entity linking (R26): match query tokens to entity canonical names."""
-    body = await req.json()
-    kb_id = body.get("kb_id", "default")
-    text = body.get("text", "")
     with tracer("graph").start_as_current_span("graph.link"):
-        matched = await anyio.to_thread.run_sync(_link_sync, kb_id, text)
+        matched = await anyio.to_thread.run_sync(_link_sync, body.kb_id, body.text)
         return {"entity_ids": matched}
 
 
@@ -159,12 +172,13 @@ def _delete_sync(document_id: str) -> int:
 
 
 @app.post("/delete", tags=["graph"])
-async def delete(req: Request) -> dict[str, int]:
+async def delete(body: DeleteRequest) -> dict[str, int]:
     """Delete a document's relations (saga compensation, R54/H-3)."""
-    body = await req.json()
-    document_id = body.get("document_id", "")
     with tracer("graph").start_as_current_span("graph.delete") as span:
-        removed = await anyio.to_thread.run_sync(_delete_sync, document_id) if document_id else 0
+        removed = (
+            await anyio.to_thread.run_sync(_delete_sync, body.document_id)
+            if body.document_id else 0
+        )
         span.set_attribute("graph.deleted", removed)
         return {"deleted": removed}
 
@@ -178,9 +192,7 @@ def _expand_sync(entity_id: str) -> list[str]:
 
 
 @app.post("/expand", tags=["graph"])
-async def expand(req: Request) -> dict[str, object]:
-    body = await req.json()
-    entity_id = body.get("entity_id", "")
+async def expand(body: ExpandRequest) -> dict[str, object]:
     with tracer("graph").start_as_current_span("graph.expand"):
-        neighbors = await anyio.to_thread.run_sync(_expand_sync, entity_id)
+        neighbors = await anyio.to_thread.run_sync(_expand_sync, body.entity_id)
         return {"entities": neighbors}  # additive graph lift (R25/R27)

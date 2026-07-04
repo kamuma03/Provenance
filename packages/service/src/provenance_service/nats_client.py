@@ -52,6 +52,20 @@ class NatsBus:
         with suppress(Exception):  # already exists / not permitted → keep going
             await self._js.add_stream(name=name, subjects=subjects)  # type: ignore[attr-defined]
 
+    async def kv_open(self, bucket: str) -> object | None:
+        """Open (or create) a JetStream KV bucket for durable key/value state, e.g. jobs parked
+        awaiting confirmation that must survive a restart (review M-3). Returns None on a
+        server without JetStream, so callers fall back to in-memory state."""
+        if self._js is None:
+            return None
+        js = self._js
+        try:
+            return await js.key_value(bucket)  # type: ignore[attr-defined, no-any-return]
+        except Exception:
+            with suppress(Exception):
+                return await js.create_key_value(bucket=bucket)  # type: ignore[attr-defined, no-any-return]
+        return None
+
     async def close(self) -> None:
         if self._conn is not None:
             await self._conn.drain()
