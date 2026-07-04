@@ -20,7 +20,9 @@ Catalog. Adopt:
 - **Database-per-service** — single owner per datastore; cross-service joins by id.
 - **Async, saga-orchestrated ingestion** with compensation; **synchronous, fan-out-limited
   query** path.
-- **Versioned contracts** — gRPC internally, REST/OpenAPI at the Gateway edge.
+- **Shared contracts** — one source of truth for cross-service types (never hand-copied,
+  N9). Implemented as HTTP/JSON with shared Pydantic contracts; gRPC internal transport is
+  deferred (R57).
 - **Distributed tracing** (OpenTelemetry); the ingestion trace *is* the provenance chain.
 
 Stand the services up first as a **P0 walking skeleton** — thin shells with real
@@ -54,7 +56,8 @@ Two deliberate **non-splits** that follow from this rule:
 
 **Mitigations**
 - P0 walking skeleton front-loads integration risk.
-- Database-per-service + versioned contracts prevent the distributed monolith.
+- Database-per-service + a single source of truth for cross-service contracts (shared Pydantic
+  today; gRPC deferred, R57) keep the boundaries real rather than a distributed monolith.
 - Only Query/Agent fans out; Parse is CPU-default and ingestion-only.
 
 ## Alternatives considered

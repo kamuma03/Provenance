@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
-from provenance_contracts import Answer, Claim
+from provenance_contracts import Answer
 from provenance_eval.metrics import groundedness, numeric_exact_match, rate
+
+_CORPUS = (
+    "Total revenue for fiscal 2022 was 4.2 billion dollars. "
+    "The independent auditor of the company is Ernst and Young LLP."
+)
 
 
 def test_numeric_exact_match_normalizes_currency_and_commas() -> None:
@@ -16,15 +21,21 @@ def test_numeric_exact_match_false_on_refusal() -> None:
     assert not numeric_exact_match("4.2 billion", Answer(text="", refused=True))
 
 
-def test_groundedness_counts_grounded_claims() -> None:
-    a1 = Answer(text="x", claims=[Claim(text="a", grounded=True), Claim(text="b", grounded=True)])
-    a2 = Answer(text="y", claims=[Claim(text="c", grounded=False)])
-    assert groundedness([a1]) == 1.0
-    assert groundedness([a1, a2]) == 2 / 3
+def test_groundedness_scores_released_text_against_corpus() -> None:
+    # Faithful answer: every salient token comes from the corpus ⇒ fully grounded.
+    faithful = Answer(text="Total revenue for fiscal 2022 was 4.2 billion dollars.")
+    assert groundedness([faithful], _CORPUS) == 1.0
+
+
+def test_groundedness_catches_hallucination_independent_of_self_report() -> None:
+    # A fabricated answer is caught even though nothing in the Answer marks it ungrounded —
+    # the metric no longer trusts the system's own report (review C-2).
+    hallucination = Answer(text="The company was founded on Mars in 1842.")
+    assert groundedness([hallucination], _CORPUS) < 0.85  # below the §9.2 fail threshold
 
 
 def test_groundedness_is_one_when_nothing_released() -> None:
-    assert groundedness([Answer(text="", refused=True)]) == 1.0
+    assert groundedness([Answer(text="", refused=True)], _CORPUS) == 1.0
 
 
 def test_rate() -> None:

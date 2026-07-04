@@ -33,7 +33,9 @@ async def _build_outcomes(spec: dict) -> tuple[list[Outcome], dict]:
     return outcomes, spec
 
 
-def compute_metrics(outcomes: list[Outcome], detection: list[dict]) -> dict[str, float]:
+def compute_metrics(
+    outcomes: list[Outcome], detection: list[dict], corpus_text: str = ""
+) -> dict[str, float]:
     answers = [o.answer for o in outcomes]
     numeric = [o for o in outcomes if o.case.cohort == "numeric_factual"]
     answerable = [o for o in outcomes if o.case.answerable]
@@ -49,14 +51,15 @@ def compute_metrics(outcomes: list[Outcome], detection: list[dict]) -> dict[str,
             any(o.case.gold_contains.lower() in t.lower() for t in o.retrieved_texts)
             for o in recall_cases
         ]),
-        "groundedness": groundedness(answers),
+        "groundedness": groundedness(answers, corpus_text),
         "detection_accuracy": rate([detect(d["text"]).domain == d["expected"] for d in detection]),
     }
 
 
 def evaluate(spec: dict) -> tuple[dict[str, float], list[str]]:
     outcomes, _ = asyncio.run(_build_outcomes(spec))
-    metrics = compute_metrics(outcomes, spec.get("detection", []))
+    corpus_text = "\n".join(doc.get("text", "") for doc in spec.get("corpus", []))
+    metrics = compute_metrics(outcomes, spec.get("detection", []), corpus_text)
     failures = [
         f"{name}={value:.3f} < fail_below={THRESHOLDS[name].fail_below}"
         for name, value in metrics.items()

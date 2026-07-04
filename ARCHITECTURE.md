@@ -33,7 +33,7 @@ Next.js UI
 Gateway / BFF ──────────► Catalog (Postgres): KB / Document / Chunk + provenance + trace_id
    ├─ async (NATS) ─► Ingestion (saga orchestrator + compensation)
    │                     └─► Parse · Extraction · Graph · Model · Vector
-   └─ sync  (gRPC) ─► Query / Agent (retrieval core + AutoGen crew)
+   └─ sync (HTTP/JSON) ─► Query / Agent (retrieval core + agent crew)
                          └─► Vector · Graph · Model
 ```
 
@@ -80,7 +80,7 @@ On failure → compensate (roll back partial writes), Document(failed). No half-
 
 ## Query path (synchronous, fan-out-limited)
 
-Gateway → Query/Agent → fan-out to Vector + Graph + Model (gRPC). Only Query/Agent fans
+Gateway → Query/Agent → fan-out to Vector + Graph + Model (HTTP/JSON). Only Query/Agent fans
 out (R53). Tokens stream back via SSE at the edge. The Planner types each subquery and
 routes relational/comparative work to additive graph expansion; the Critic verifies
 groundedness claim-by-claim; the Synthesizer composes the cited answer.
@@ -103,8 +103,11 @@ Same images also target ECS/EKS on AWS (managed equivalents by config, R58 — d
 
 ## Tech stack
 
-Python/FastAPI services · Next.js/TypeScript UI · hybrid retrieval (FAISS + BM25 RRF) + cross-encoder
-rerank · a 4-agent crew (Planner/Retriever/Critic/Synthesizer) · Kuzu (graph) · Postgres +
-FAISS/Qdrant/pgvector (data) · NATS (queue) · Docling + PaddleOCR/RapidOCR (parsing) · fastembed +
-onnxruntime-gpu (`bge-small` + `bge-reranker-v2-m3`) · local LLM tiers (Ollama `qwen`,
-OpenAI-compatible) with Claude as A/B + eval judge · RAGAS (eval) · OpenTelemetry (tracing).
+Python/FastAPI services (HTTP/JSON with shared Pydantic contracts; gRPC deferred) ·
+Next.js/TypeScript UI · hybrid retrieval (FAISS + BM25 RRF) + cross-encoder rerank ·
+a hand-rolled 4-agent crew (Planner/Retriever/Critic/Synthesizer) · Kuzu (graph) · Postgres +
+FAISS/Qdrant/pgvector (data) · NATS core pub/sub (queue; JetStream durability deferred) ·
+Docling + PaddleOCR/RapidOCR (parsing) · fastembed + onnxruntime-gpu (`bge-small` +
+`bge-reranker-v2-m3`) · local LLM tiers (Ollama `qwen`, OpenAI-compatible) with Claude as A/B +
+eval judge · an offline eval gate (numeric exactness / groundedness / detection / refusal;
+RAGAS faithfulness deferred, LLM-judged on the Spark) · OpenTelemetry (tracing).

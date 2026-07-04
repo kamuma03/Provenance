@@ -151,6 +151,35 @@ async def test_crew_revises_then_succeeds() -> None:
 
 
 @pytest.mark.asyncio
+async def test_crew_refuses_llm_hallucination_in_released_text() -> None:
+    # The Critic must verify the LLM prose the user actually reads, not the chunk echoes.
+    # A synthesizer that fabricates must be refused, never released (R31/R32/R65, review C-1).
+    from provenance_service import MockLLMClient
+
+    async def retrieve(_kb: str, q: str) -> EvidenceSet:
+        return _evidence(q, [_chunk("c1", "total revenue was 4.2 billion")])
+
+    fabricate = MockLLMClient(lambda _s, _p: "Fabricated: revenue was 999 trillion.")
+    ans = await run_crew("what was revenue", "kb1", retrieve, synthesizer=Synthesizer(fabricate))
+    assert ans.refused is True  # fabricated released text is caught and refused
+    assert "ungrounded" in (ans.refusal_reason or "")
+
+
+@pytest.mark.asyncio
+async def test_synthesizer_decomposes_released_llm_text_into_cited_claims() -> None:
+    # When an LLM writes the answer, claims mirror the released sentences and carry span cites.
+    from provenance_service import MockLLMClient
+
+    plan = await Planner().plan("what was revenue", ["kb"])
+    ev = [_evidence("q", [_chunk("c1", "total revenue was 4.2 billion")])]
+    synth = Synthesizer(MockLLMClient(lambda _s, _p: "Total revenue was 4.2 billion."))
+    ans = await synth.synthesize(plan, ev)
+    assert ans.text == "Total revenue was 4.2 billion."
+    assert [c.text for c in ans.claims] == ["Total revenue was 4.2 billion."]
+    assert ans.claims[0].citations[0].chunk_id == "c1"  # span provenance on released text
+
+
+@pytest.mark.asyncio
 async def test_crew_strict_refusal_on_exhaustion() -> None:
     async def retrieve(_kb: str, q: str) -> EvidenceSet:
         return _evidence(q, [_chunk("c1", "the auditor is Ernst and Young")])

@@ -87,7 +87,9 @@ async def _vector_step(c: Ctx) -> None:
              "document_id": str(c["document_id"]), "page": str(ch.page),
              "bbox": ch.bbox.model_dump_json(),  # carried for citation highlight (R36)
          }}
-        for ch, emb in zip(chunks, embeddings, strict=False)
+        # strict=True: an embeddings/chunks count mismatch must fail the saga, not silently
+        # drop trailing chunks from the index while reporting done (review M-10).
+        for ch, emb in zip(chunks, embeddings, strict=True)
     ]
     if records:
         await call("vector", "/upsert", {"namespace": c["kb_id"], "records": records})

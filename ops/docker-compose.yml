@@ -51,6 +51,9 @@ services:
       POSTGRES_PASSWORD: change-me
       POSTGRES_DB: provenance
     volumes:
+      # Persist the catalog across container recreation — without this the whole catalog is
+      # lost on `docker compose down/up` while kuzu_data survives (split-brain, review H-3d).
+      - pg_data:/var/lib/postgresql/data
       - ./sql/catalog_init.sql:/docker-entrypoint-initdb.d/catalog_init.sql:ro
     ports: ["5432:5432"]
 
@@ -82,7 +85,7 @@ services:
   # One-shot: pull the two tier models into the shared volume, then exit.
   ollama-pull:
     image: ollama/ollama:latest
-    profiles: ["llm"]
+    profiles: ["llm-pull"]              # separate profile so start.sh --no-pull can skip it
     depends_on:
       - ollama
     environment:
@@ -152,3 +155,4 @@ services:
 volumes:
   kuzu_data:
   ollama_data:
+  pg_data:

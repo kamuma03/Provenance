@@ -42,3 +42,9 @@ def test_docling_maps_to_parse_result() -> None:
         assert e.bbox.x1 >= e.bbox.x0 and e.bbox.y1 >= e.bbox.y0
     orders = [e.reading_order for e in result.elements]
     assert orders == sorted(orders)
+
+    # Bbox origin: the title sits near the top of a US-Letter page (792pt tall). With a
+    # top-left origin its y0 must land in the top third; a bottom-left (flipped) origin
+    # would put it in the bottom third (review H-2).
+    title = next(e for e in result.elements if "annual report" in e.text.lower())
+    assert title.bbox.y0 < 792 / 3

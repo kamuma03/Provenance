@@ -49,6 +49,31 @@ def _tokens(text: str) -> set[str]:
     return set(re.findall(r"[a-z0-9]+", text.lower()))
 
 
+def _sentences(text: str) -> list[str]:
+    """Atomic-claim split of an answer (R65): sentence granularity is the floor."""
+    return [s.strip() for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s.strip()]
+
+
+def _cite_for(sentence: str, chunks: list[ScoredChunk]) -> list[Citation]:
+    """Attach the best-overlapping evidence chunk as this sentence's span citation.
+
+    Span-level provenance (R36/R65): a released sentence points at the chunk it is most
+    grounded in. No overlap ⇒ no citation, and the Critic will flag it ungrounded.
+    """
+    st = _tokens(sentence)
+    if not st:
+        return []
+    best: ScoredChunk | None = None
+    best_overlap = 0.0
+    for c in chunks:
+        overlap = len(st & _tokens(c.text)) / len(st)
+        if overlap > best_overlap:
+            best, best_overlap = c, overlap
+    if best is None or best_overlap == 0.0:
+        return []
+    return [Citation(chunk_id=best.chunk_id, page=best.page, bbox=best.bbox)]
+
+
 # --------------------------------------------------------------------------- Planner
 class Planner:
     """Query → Plan: decompose, scope KB, type each subquery (R29)."""
@@ -116,14 +141,24 @@ class Synthesizer:
                 refused=True,
                 refusal_reason="not supported by the corpus",
             )
-        # Claims (with citations) are always chunk-derived — the grounding anchor (R65).
+        # Extractive default: claims are chunk-derived, grounded by construction (R65).
         claims = [
             Claim(text=c.text, citations=[Citation(chunk_id=c.chunk_id, page=c.page, bbox=c.bbox)])
             for c in chunks
         ]
         text = " ".join(c.text for c in claims)
         if self._llm is not None:
-            text = await self._llm_text(plan, chunks) or text
+            llm_text = await self._llm_text(plan, chunks)
+            if llm_text:
+                # The user reads the LLM prose, so the Critic must verify *that* — not the
+                # chunk echoes above. Decompose the released text into atomic claims and cite
+                # each from the evidence, so groundedness is checked on what is actually shown
+                # and span provenance maps to released sentences (R65/R36, review C-1).
+                text = llm_text
+                decomposed = [
+                    Claim(text=s, citations=_cite_for(s, chunks)) for s in _sentences(llm_text)
+                ]
+                claims = decomposed or claims
         return Answer(text=text, claims=claims)
 
     async def _llm_text(self, plan: Plan, chunks: list[ScoredChunk]) -> str | None:
@@ -204,7 +239,9 @@ class Critic:
             )
             return out.strip().upper().startswith("YES")
         except Exception:
-            return self._grounded(claim, [_tokens(evidence)])  # degrade to heuristic
+            # Fail closed: a judge failure must not silently pass a claim through the release
+            # gate. Ungrounded ⇒ REVISE ⇒ honest refusal on exhaustion (R31/R32, review C-1).
+            return False
 
 
 # ------------------------------------------------------------------------ orchestration
