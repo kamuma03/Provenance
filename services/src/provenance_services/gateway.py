@@ -11,6 +11,7 @@ import base64
 import binascii
 import hashlib
 import json
+import logging
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
@@ -18,9 +19,25 @@ from typing import Any
 from fastapi import Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from provenance_service import NatsBus, ServiceSettings, create_app, tracer
+from pydantic import BaseModel
 
 from .catalog import Catalog
 from .clients import call, call_get
+
+log = logging.getLogger("gateway")
+
+
+# Typed request bodies for the public edge (N9): validated by FastAPI and surfaced in the
+# OpenAPI schema, so a missing `query` is a 422 instead of a silent empty-string default
+# (review M-5). Internal service-to-service endpoints stay dict-based for now — see the plan.
+class QueryRequest(BaseModel):
+    query: str
+    kb_id: str = "default"
+
+
+class KbRequest(BaseModel):
+    name: str = "untitled"
+    domain_id: str = "generic"
 
 
 def _sse(event: str, data: dict[str, Any]) -> str:
@@ -89,10 +106,9 @@ app.add_middleware(
 
 
 @app.post("/kb", tags=["gateway"])
-async def create_kb(req: Request) -> dict[str, str]:
-    body = await req.json()
+async def create_kb(body: KbRequest) -> dict[str, str]:
     kb_id = f"kb_{uuid.uuid4().hex[:8]}"
-    await catalog.create_kb(kb_id, body.get("name", "untitled"), body.get("domain_id", "generic"))
+    await catalog.create_kb(kb_id, body.name, body.domain_id)
     return {"id": kb_id}
 
 
@@ -142,32 +158,35 @@ async def kb_stats(kb_id: str) -> dict[str, object]:
 
 
 @app.post("/query", tags=["gateway"])
-async def query(req: Request) -> dict[str, object]:
-    body = await req.json()
-    payload = {"query": body.get("query", ""), "kb_id": body.get("kb_id", "default")}
+async def query(body: QueryRequest) -> dict[str, object]:
+    payload = {"query": body.query, "kb_id": body.kb_id}
     with tracer("gateway").start_as_current_span("gateway.query"):
         return await call("query", "/answer", payload)
 
 
 @app.post("/query/stream", tags=["gateway"])
-async def query_stream(req: Request) -> StreamingResponse:
+async def query_stream(body: QueryRequest) -> StreamingResponse:
     """Stream the answer over SSE (R35): status → tokens → done{answer, evidence}."""
-    body = await req.json()
-    kb_id = body.get("kb_id", "default")
-    query_text = body.get("query", "")
-    payload = {"kb_id": kb_id, "query": query_text}
+    payload = {"kb_id": body.kb_id, "query": body.query}
 
     async def gen() -> AsyncIterator[str]:
-        yield _sse("status", {"phase": "retrieving"})
-        evidence = await call("query", "/retrieve", payload)  # chunks + entity_ids (R37/R36)
-        yield _sse("status", {"phase": "synthesizing"})
-        result = await call("query", "/answer", payload)
-        answer = result.get("answer", {})
-        if answer.get("refused"):
-            yield _sse("token", {"text": answer.get("text", "")})
-        else:
-            for word in answer.get("text", "").split():
-                yield _sse("token", {"text": word + " "})
-        yield _sse("done", {"answer": answer, "evidence": evidence})
+        try:
+            yield _sse("status", {"phase": "retrieving"})
+            # One backend call: /answer retrieves once and returns the evidence it used, so we
+            # don't retrieve twice and the `done` evidence matches the citations (R36, M-15).
+            result = await call("query", "/answer", payload)
+            answer = result.get("answer", {})
+            evidence = result.get("evidence", {})
+            yield _sse("status", {"phase": "synthesizing"})
+            if answer.get("refused"):
+                yield _sse("token", {"text": answer.get("text", "")})
+            else:
+                for word in answer.get("text", "").split():
+                    yield _sse("token", {"text": word + " "})
+            yield _sse("done", {"answer": answer, "evidence": evidence})
+        except Exception as exc:
+            # Emit an error event so the UI stops spinning instead of hanging forever (M-15).
+            log.warning("query stream failed: %s", exc)
+            yield _sse("error", {"message": "the query failed — please retry"})
 
     return StreamingResponse(gen(), media_type="text/event-stream")

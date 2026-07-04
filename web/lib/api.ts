@@ -50,7 +50,9 @@ export async function streamQuery(
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ kb_id: kbId, query }),
+      signal: handlers.signal,
     });
+    if (!res.ok) throw new Error(`query/stream → ${res.status}`);
     if (!res.body) throw new Error("no response body");
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -83,4 +85,5 @@ function dispatchEvent(raw: string, handlers: StreamHandlers): void {
   if (event === "status") handlers.onStatus?.(payload.phase);
   else if (event === "token") handlers.onToken?.(payload.text);
   else if (event === "done") handlers.onDone?.(payload.answer as Answer, payload.evidence as Evidence);
+  else if (event === "error") handlers.onError?.(new Error(payload.message ?? "stream error"));
 }

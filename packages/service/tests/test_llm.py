@@ -124,3 +124,28 @@ async def test_openai_compat_posts_chat_completions(monkeypatch: pytest.MonkeyPa
     assert captured["url"] == "http://spark:8000/v1/chat/completions"
     assert captured["json"]["model"] == "qwen3-14b"
     assert captured["json"]["messages"][0]["role"] == "system"
+
+
+@pytest.mark.asyncio
+async def test_openai_compat_null_content_returns_empty_not_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A reasoning model can return null content; we must return "" not the literal "None"
+    # that str(None) produced, which would poison the answer text (review M-14).
+    class _Resp:
+        def raise_for_status(self) -> None: ...
+        def json(self) -> dict:
+            return {"choices": [{"message": {"content": None}, "finish_reason": "length"}]}
+
+    class _Client:
+        def __init__(self, *a, **k) -> None: ...
+        async def __aenter__(self) -> _Client:
+            return self
+        async def __aexit__(self, *a) -> bool:
+            return False
+        async def post(self, url, json, headers):  # type: ignore[no-untyped-def]
+            return _Resp()
+
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    out = await OpenAICompatLLMClient("http://spark:8000/v1", "qwen").complete("s", "p")
+    assert out == ""  # not "None"

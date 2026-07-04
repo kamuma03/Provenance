@@ -45,6 +45,7 @@ export interface StreamHandlers {
   onToken?: (text: string) => void;
   onDone?: (answer: Answer, evidence: Evidence) => void;
   onError?: (err: unknown) => void;
+  signal?: AbortSignal;
 }
 
 export const DOMAINS = [

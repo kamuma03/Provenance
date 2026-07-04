@@ -1,0 +1,25 @@
+# Keep the Docker build context small (review M-17): the image only needs pyproject +
+# packages + services, but the build context is the repo root, so without this the web UI's
+# node_modules, the .git history, the local venv, and caches were shipped to the daemon for
+# every one of the 8 service images.
+.git
+.gitignore
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# UI is built separately, not baked into the Python service image.
+web/node_modules
+web/.next
+node_modules
+
+# Docs, eval corpora, and scratch aren't needed at runtime.
+docs
+eval
+tests
+scratchpad
+*.md
+!README.md

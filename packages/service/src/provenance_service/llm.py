@@ -17,9 +17,12 @@ and route each task to a tier — swapping the underlying model is then a one-li
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Callable
 from typing import Protocol
+
+log = logging.getLogger("llm")
 
 
 class LLMClient(Protocol):
@@ -57,12 +60,17 @@ class AnthropicLLMClient:
         self.model_id = model or os.environ.get("LLM_MODEL", "claude-opus-4-8")
 
     async def complete(self, system: str, prompt: str) -> str:
+        max_tokens = int(os.environ.get("LLM_MAX_TOKENS", "2048"))  # was hardcoded 1024 (M-14)
         msg = await self._client.messages.create(
             model=self.model_id,
-            max_tokens=1024,
+            max_tokens=max_tokens,
             system=system,
             messages=[{"role": "user", "content": prompt}],
         )
+        if getattr(msg, "stop_reason", None) == "max_tokens":
+            # A truncated answer must not be treated as complete downstream (review M-14).
+            log.warning("Anthropic response truncated at max_tokens=%d (model=%s)",
+                        max_tokens, self.model_id)
         return "".join(block.text for block in msg.content if block.type == "text")
 
 
@@ -103,7 +111,13 @@ class OpenAICompatLLMClient:
             )
             resp.raise_for_status()
             data = resp.json()
-        return str(data["choices"][0]["message"]["content"])
+        choice = data["choices"][0]
+        if choice.get("finish_reason") == "length":
+            log.warning("local LLM response truncated (finish_reason=length, model=%s)",
+                        self.model_id)
+        # Reasoning models can return null content; return "" rather than the literal "None"
+        # that str(None) would produce and poison the answer text (review M-14).
+        return choice.get("message", {}).get("content") or ""
 
 
 # Recommended per-task defaults (volume × difficulty × where-it-runs). Each resolves to

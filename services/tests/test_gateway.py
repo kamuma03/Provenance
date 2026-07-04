@@ -91,3 +91,41 @@ async def test_intermediate_status_event_uses_plain_update(monkeypatch: pytest.M
     monkeypatch.setattr(gateway.catalog, "update_status", fake_update)
     await gateway._on_status(json.dumps({"document_id": "d2", "status": "extracting"}).encode(), {})
     assert calls == [("d2", "extracting")]
+
+
+def test_query_endpoint_rejects_missing_query_field() -> None:
+    # The typed edge validates input instead of silently defaulting to an empty query (M-5).
+    r = client.post("/query", json={"kb_id": "kb"})  # no 'query'
+    assert r.status_code == 422
+
+
+def test_query_stream_makes_a_single_backend_call_and_streams_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # One /answer call (not /retrieve + /answer), and the done event carries its evidence (M-15).
+    paths: list[str] = []
+
+    async def fake_call(service, path, payload=None):  # type: ignore[no-untyped-def]
+        paths.append(path)
+        return {
+            "answer": {"text": "hello world", "refused": False, "claims": []},
+            "evidence": {"subquery": "q", "chunks": [], "entity_ids": [], "graph_expanded": False},
+        }
+
+    monkeypatch.setattr(gateway, "call", fake_call)
+    with client.stream("POST", "/query/stream", json={"kb_id": "kb", "query": "q"}) as r:
+        body = "".join(r.iter_text())
+    assert paths == ["/answer"]  # single retrieval path
+    assert "event: done" in body and "hello" in body
+
+
+def test_query_stream_emits_error_event_on_backend_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def boom(service, path, payload=None):  # type: ignore[no-untyped-def]
+        raise RuntimeError("query service down")
+
+    monkeypatch.setattr(gateway, "call", boom)
+    with client.stream("POST", "/query/stream", json={"kb_id": "kb", "query": "q"}) as r:
+        body = "".join(r.iter_text())
+    assert "event: error" in body  # UI stops spinning instead of hanging
