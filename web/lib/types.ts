@@ -4,6 +4,8 @@ export interface BBox {
   y0: number;
   x1: number;
   y1: number;
+  page_width?: number | null;
+  page_height?: number | null;
 }
 
 export interface Citation {

@@ -54,9 +54,10 @@ export default function CitationPanel({ claims }: { claims: Claim[] }) {
 
 /** Schematic page with the cited bbox highlighted (stands in for the PDF render). */
 function BBoxView({ c }: { c: Citation }) {
-  // Normalize the bbox into the schematic viewport (letter-ish proportions).
-  const pageW = 612;
-  const pageH = 792;
+  // Normalize using the source page's real dimensions when carried (L-10); fall back to
+  // US-Letter only when the parse didn't record them.
+  const pageW = c.bbox.page_width ?? 612;
+  const pageH = c.bbox.page_height ?? 792;
   const left = `${(c.bbox.x0 / pageW) * 100}%`;
   const top = `${(c.bbox.y0 / pageH) * 100}%`;
   const width = `${(Math.max(c.bbox.x1 - c.bbox.x0, 8) / pageW) * 100}%`;

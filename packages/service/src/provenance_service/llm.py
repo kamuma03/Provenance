@@ -134,6 +134,24 @@ DEFAULT_ROUTES: dict[str, str] = {
 _LOCAL_PROVIDERS = {"local", "openai", "vllm", "ollama", "sglang"}
 _TIER_ENV = {"high": "LLM_TIER_HIGH", "low": "LLM_TIER_LOW"}
 
+# Clients are reused across requests, keyed on their connection identity (provider, model,
+# base_url) — so the crew doesn't build a fresh Anthropic SDK client / httpx pool every call
+# (review M-14). The cache is only populated *after* the availability check (key / base_url),
+# so a spec that resolves to None (heuristic) is never cached and env changes that flip a
+# provider on/off are still honored.
+_CLIENT_CACHE: dict[tuple[str, str, str], LLMClient] = {}
+
+
+def _cached(
+    provider: str, model: str, base_url: str, factory: Callable[[], LLMClient]
+) -> LLMClient:
+    key = (provider, model, base_url)
+    client = _CLIENT_CACHE.get(key)
+    if client is None:
+        client = factory()
+        _CLIENT_CACHE[key] = client
+    return client
+
 
 def client_from_spec(spec: str) -> LLMClient | None:
     """Resolve a "<provider>:<model>" spec to a client, or None if unavailable/heuristic.
@@ -153,7 +171,7 @@ def client_from_spec(spec: str) -> LLMClient | None:
         if not os.environ.get("ANTHROPIC_API_KEY"):
             return None  # no key → heuristic fallback
         try:
-            return AnthropicLLMClient(model or None)
+            return _cached("anthropic", model, "", lambda: AnthropicLLMClient(model or None))
         except Exception:  # pragma: no cover - SDK missing
             return None
     if provider in _LOCAL_PROVIDERS:
@@ -161,8 +179,33 @@ def client_from_spec(spec: str) -> LLMClient | None:
         if not base_url:
             return None  # no local endpoint configured → heuristic fallback
         api_key = os.environ.get("LLM_LOCAL_API_KEY")
-        return OpenAICompatLLMClient(base_url, model or "default", api_key)
+        return _cached(
+            "local", model, base_url,
+            lambda: OpenAICompatLLMClient(base_url, model or "default", api_key),
+        )
     raise ValueError(f"unknown LLM provider in spec: {spec!r}")
+
+
+def validate_routes(tasks: list[str] | None = None) -> None:
+    """Fail fast at startup on an unknown-provider typo in any configured route, instead of
+    raising per-request deep in a handler (review M-14). Missing keys/endpoints are NOT errors
+    — those are the intended heuristic fallback — so this only rejects malformed provider names.
+    """
+    specs: list[str] = []
+    for task in tasks or list(DEFAULT_ROUTES):
+        spec = os.environ.get(f"LLM_{task.upper()}") or DEFAULT_ROUTES.get(task, "")
+        if spec:
+            specs.append(spec)
+    for env_key in ("LLM_TIER_HIGH", "LLM_TIER_LOW", "LLM_DEFAULT"):
+        if os.environ.get(env_key):
+            specs.append(os.environ[env_key])
+    for spec in specs:
+        s = spec.strip()
+        if not s or s.lower() in ("heuristic", "none", "off", "high", "low"):
+            continue
+        provider = s.partition(":")[0].lower()
+        if provider != "anthropic" and provider not in _LOCAL_PROVIDERS:
+            raise ValueError(f"unknown LLM provider in configured route: {spec!r}")
 
 
 def get_llm(task: str | None = None) -> LLMClient | None:

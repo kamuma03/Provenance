@@ -49,13 +49,21 @@ class ElementType(StrEnum):
 
 
 class BBox(BaseModel):
-    """Bounding box anchoring a chunk to its source for citation highlight (R6, R36)."""
+    """Bounding box anchoring a chunk to its source for citation highlight (R6, R36).
+
+    Coordinates are in the page's own units (PDF points). page_width/page_height carry the
+    source page's dimensions so a citation highlight normalizes correctly on any page size —
+    A4, legal, etc. — instead of assuming US-Letter (review L-10). Optional for backward
+    compatibility; the UI falls back to Letter when absent.
+    """
 
     page: int = Field(ge=0)
     x0: float
     y0: float
     x1: float
     y1: float
+    page_width: float | None = None
+    page_height: float | None = None
 
 
 class KnowledgeBase(BaseModel):

@@ -14,13 +14,15 @@ OVERLAP_CHARS = 150
 
 
 def _union_bbox(elements: list[ParsedElement]) -> BBox:
-    page = elements[0].page
+    first = elements[0].bbox
     return BBox(
-        page=page,
+        page=elements[0].page,
         x0=min(e.bbox.x0 for e in elements),
         y0=min(e.bbox.y0 for e in elements),
         x1=max(e.bbox.x1 for e in elements),
         y1=max(e.bbox.y1 for e in elements),
+        page_width=first.page_width,  # same page → same dims; carry them for citations (L-10)
+        page_height=first.page_height,
     )
 
 
