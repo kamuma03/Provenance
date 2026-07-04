@@ -9,6 +9,7 @@ from provenance_service.llm import (
     OpenAICompatLLMClient,
     client_from_spec,
     get_llm,
+    validate_routes,
 )
 
 
@@ -43,6 +44,30 @@ def test_local_spec_needs_a_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_unknown_provider_raises() -> None:
     with pytest.raises(ValueError):
         client_from_spec("cohere:command")
+
+
+def test_client_is_cached_across_calls(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The crew must reuse one client (and its connection pool), not build a fresh one per
+    # request (review M-14).
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    a = client_from_spec("anthropic:claude-opus-4-8")
+    b = client_from_spec("anthropic:claude-opus-4-8")
+    assert a is not None and a is b
+
+
+def test_validate_routes_accepts_known_providers(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_CRITIC", "anthropic:claude-opus-4-8")
+    monkeypatch.setenv("LLM_PLANNER", "local:qwen3-14b")
+    validate_routes(["critic", "planner"])  # must not raise
+
+
+def test_validate_routes_rejects_unknown_provider_at_startup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A provider typo should fail fast at startup, not per-request deep in a handler (M-14).
+    monkeypatch.setenv("LLM_CRITIC", "cohere:command")
+    with pytest.raises(ValueError, match="unknown LLM provider"):
+        validate_routes(["critic"])
 
 
 def test_router_reads_per_task_env(monkeypatch: pytest.MonkeyPatch) -> None:

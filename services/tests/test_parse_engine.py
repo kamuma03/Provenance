@@ -60,6 +60,12 @@ def test_digital_first_parse_yields_geometry_and_provenance() -> None:
     text_blob = " ".join(el.text for el in result.elements)
     assert "Risk Factors" in text_blob
 
+    # Page dimensions are carried on every bbox so citation highlights scale to the real page
+    # size (US-Letter here = 612×792), not a hardcoded assumption (review L-10).
+    for el in result.elements:
+        assert el.bbox.page_width == pytest.approx(612, abs=1)
+        assert el.bbox.page_height == pytest.approx(792, abs=1)
+
 
 def test_prose_beside_a_table_is_not_discarded() -> None:
     # A line sharing a table's vertical band but sitting in a different column must survive;

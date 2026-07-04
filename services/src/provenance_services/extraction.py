@@ -9,13 +9,18 @@ from typing import cast
 
 from fastapi import Request
 from provenance_contracts import GENERIC_FALLBACK_ID, REGISTRY
-from provenance_service import create_app, get_llm, tracer
+from provenance_service import create_app, get_llm, tracer, validate_routes
 
 from .detection import detect, should_pause_for_confirmation
 from .extraction_engine import extract as run_extract
 from .extraction_engine import make_llm_extractor
 
-app = create_app("extraction")
+
+async def _startup() -> None:
+    validate_routes(["extraction", "detection"])  # fail fast on a route typo (M-14)
+
+
+app = create_app("extraction", on_startup=_startup)
 
 
 @app.get("/domains", tags=["extraction"])

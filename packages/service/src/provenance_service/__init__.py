@@ -8,6 +8,7 @@ from .llm import (
     OpenAICompatLLMClient,
     client_from_spec,
     get_llm,
+    validate_routes,
 )
 from .nats_client import NatsBus
 from .settings import ServiceSettings
@@ -26,4 +27,5 @@ __all__ = [
     "OpenAICompatLLMClient",
     "client_from_spec",
     "get_llm",
+    "validate_routes",
 ]

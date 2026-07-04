@@ -11,13 +11,18 @@ from typing import cast
 
 from fastapi import Request
 from provenance_contracts import EvidenceSet, QueryHit, ScoredChunk
-from provenance_service import create_app, tracer
+from provenance_service import create_app, tracer, validate_routes
 
 from .clients import call
 from .crew import run_crew
 from .retrieval import RetrievalDeps, retrieve
 
-app = create_app("query-agent")
+
+async def _startup() -> None:
+    validate_routes(["planner", "synthesizer", "critic"])  # fail fast on a route typo (M-14)
+
+
+app = create_app("query-agent", on_startup=_startup)
 
 
 async def _embed(query: str) -> list[float]:

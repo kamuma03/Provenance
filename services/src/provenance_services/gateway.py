@@ -49,6 +49,7 @@ catalog = Catalog()
 
 INGEST_SUBJECT = "ingest.jobs"
 STATUS_SUBJECT = "ingest.status"
+CONFIRM_SUBJECT = "ingest.confirm"
 INGEST_STREAM = "INGEST"
 
 
@@ -150,6 +151,13 @@ async def upload_document(kb_id: str, req: Request) -> JSONResponse:
 async def get_document(doc_id: str) -> JSONResponse:
     doc = await catalog.get_document(doc_id)
     return JSONResponse(status_code=200 if doc else 404, content=doc or {"error": "not found"})
+
+
+@app.post("/documents/{doc_id}/confirm", tags=["gateway"])
+async def confirm_document(doc_id: str) -> dict[str, str]:
+    """Confirm a paused (awaiting_confirm) document so ingestion resumes it (R9/R55, M-3)."""
+    await bus.publish(CONFIRM_SUBJECT, json.dumps({"document_id": doc_id}).encode())
+    return {"document_id": doc_id, "status": "confirming"}
 
 
 @app.get("/kb/{kb_id}/stats", tags=["gateway"])

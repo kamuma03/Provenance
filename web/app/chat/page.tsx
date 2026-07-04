@@ -93,7 +93,7 @@ export default function ChatPage() {
               </p>
             )}
             {turn.answer && !turn.answer.refused && (
-              <CitationPanel claims={turn.answer.claims} />
+              <CitationPanel claims={turn.answer.claims ?? []} />
             )}
           </div>
           <div className="col panel">
@@ -102,7 +102,7 @@ export default function ChatPage() {
             {turn.evidence && (
               <p className="muted" style={{ fontSize: "0.8rem" }}>
                 graph lift: {turn.evidence.graph_expanded ? "applied" : "none (vector floor)"} ·
-                {" "}{turn.evidence.chunks.length} chunk(s) retrieved
+                {" "}{turn.evidence.chunks?.length ?? 0} chunk(s) retrieved
               </p>
             )}
           </div>

@@ -77,7 +77,7 @@ cat <<EOF
 Provenance is up.
   Gateway / API   http://localhost:8000        (OpenAPI: /docs, health: /health)
 $( [[ $llm == on ]] && echo "  Ollama (LLM)    http://localhost:11434       (OpenAI-compatible: /v1)" )
-  Web UI          cd web && npm install && npm run dev   (http://localhost:3000)
+  Web UI          http://localhost:3000        (built + served by the compose 'web' service)
 
   Logs   ${COMPOSE[*]} logs -f [service]
   Stop   scripts/stop.sh        (add --clean to drop data volumes)

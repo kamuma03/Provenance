@@ -70,6 +70,7 @@ def parse_pdf_bytes(content: bytes, *, enable_ocr: bool = True) -> ParseResult:
     with pdfplumber.open(io.BytesIO(content)) as pdf:
         n_pages = len(pdf.pages)
         for pidx, page in enumerate(pdf.pages):
+            pw, ph = float(page.width), float(page.height)  # carry page dims for citation scaling
             tables = page.find_tables()
             table_spans = [t.bbox for t in tables]
 
@@ -82,7 +83,8 @@ def parse_pdf_bytes(content: bytes, *, enable_ocr: bool = True) -> ParseResult:
                 x0, top, x1, bottom = t.bbox
                 raw.append(
                     (pidx, top, x0, ElementType.TABLE, text,
-                     BBox(page=pidx, x0=x0, y0=top, x1=x1, y1=bottom))
+                     BBox(page=pidx, x0=x0, y0=top, x1=x1, y1=bottom,
+                          page_width=pw, page_height=ph))
                 )
 
             # Text lines outside any table bbox (avoid duplicating table text).
@@ -94,7 +96,8 @@ def parse_pdf_bytes(content: bytes, *, enable_ocr: bool = True) -> ParseResult:
                     continue
                 raw.append(
                     (pidx, top, x0, ElementType.TEXT, ln["text"],
-                     BBox(page=pidx, x0=x0, y0=top, x1=x1, y1=bottom))
+                     BBox(page=pidx, x0=x0, y0=top, x1=x1, y1=bottom,
+                          page_width=pw, page_height=ph))
                 )
 
             page_methods[pidx] = (

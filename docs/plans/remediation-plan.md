@@ -58,20 +58,31 @@ docs stop describing infrastructure that doesn't exist.
 
 ---
 
-> **Status (updated):** Phases 0 ✅, 1 ✅, and 2 ✅ are implemented, tested, and green
-> (ruff + mypy + 141 passing tests + eval gate + license audit; web lint/tsc/build pass).
-> **Deferred follow-ups** (larger or untestable-here, left as honest notes):
+> **Status (updated):** Phases 0 ✅, 1 ✅, 2 ✅, 3 ✅ done, and the **follow-ups branch**
+> (`chore/review-followups`) closed most of the earlier deferrals — all green
+> (ruff + mypy + 147 passing tests + eval gate + license audit + TS-drift check; web
+> lint/tsc/build pass; compose valid).
+>
+> **Follow-ups completed:**
+> - M-14 ✅ — LLM clients cached by connection identity; `validate_routes()` fails fast on a
+>   provider typo at startup (wired into extraction + query-agent).
+> - L-10 ✅ — BBox carries page_width/page_height end-to-end; the UI scales highlights to the
+>   real page size instead of hardcoded US-Letter.
+> - M-17 ✅ — the web UI is a compose service (standalone Next image); `.dockerignore` + the
+>   ingest base64 fix already shipped in Phase 2.
+> - M-5 ✅ (N9 core) — web contract types are generated from the Pydantic contracts with a CI
+>   drift check. (Typing every *internal* service endpoint is still open — internal calls are
+>   trusted; low value.)
+> - M-3 ✅ — detect-but-confirm now pauses on low confidence (REQUIRE_DOMAIN_CONFIRM), holds the
+>   job, and resumes via `POST /documents/{id}/confirm` → `ingest.confirm`. (Paused jobs are
+>   held in-memory for v1; a durable JetStream-KV store is the next step.)
+>
+> **Still deferred** (honest notes):
 > - H-13: non-root container user, `uv sync --frozen`, pinning the `ghcr.io/astral-sh/uv` copy
->   source (Docker image build can't be exercised in this environment).
-> - M-5: only the **gateway query edge** is typed with Pydantic request models so far (validation +
->   OpenAPI at the edge, N9). Typing every internal service endpoint and **generating the web TS
->   types from OpenAPI in CI** is the larger remaining half.
-> - M-3: the detect-but-confirm **resume** flow (R55) — the PAUSED outcome is now reported, but
->   interactive confirmation + saga resume is not built.
-> - M-14: client caching / startup route validation (the concrete null-content / truncation /
->   max-tokens bugs are fixed).
-> - M-17: a **web service in the compose stack** and pre-baking the HuggingFace reranker export for
->   air-gapped rebuilds (the `.dockerignore` and the ingest-page O(n²) base64 freeze are fixed).
+>   source — the multi-GB CUDA Docker image can't be built/exercised in this environment.
+> - M-5: typing every internal service endpoint (trusted service-to-service; low value).
+> - M-3: durable (restart-surviving) storage of paused jobs.
+> - M-17: pre-baking the HuggingFace reranker export for fully air-gapped image rebuilds.
 >
 > - L-10: keyboard-accessible citations, `htmlFor` labels, and `aria-live` streaming status are
 >   done; carrying real **page dimensions in the Citation contract** (so the bbox highlight isn't

@@ -36,6 +36,7 @@ class RetrievalDeps:
 def _to_chunk(h: QueryHit) -> ScoredChunk:
     page = int(h.metadata.get("page", "0") or 0)
     raw = h.metadata.get("bbox")
+    # BBox.model_validate_json preserves page_width/page_height carried from parse (L-10).
     bbox = BBox.model_validate_json(raw) if raw else BBox(page=page, x0=0, y0=0, x1=0, y1=0)
     return ScoredChunk(chunk_id=h.chunk_id, text=h.text, page=page, bbox=bbox, score=h.score)
 

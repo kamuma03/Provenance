@@ -76,3 +76,49 @@ async def test_malformed_job_does_not_escape_the_consumer_callback(
 
     await ingestion._run_saga(b"this is not json{{{", {})  # must not raise
     assert ("?", "failed") in published  # contained and reported
+
+
+@pytest.mark.asyncio
+async def test_detect_step_pauses_when_confirmation_required(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # detect-but-confirm (R9/R55, M-3): a low-confidence detection pauses the saga...
+    monkeypatch.setattr(ingestion, "_REQUIRE_CONFIRM", True)
+
+    async def fake_call(service, path, payload=None):  # type: ignore[no-untyped-def]
+        return {"domain": "generic", "confidence": 0.1, "needs_confirmation": True}
+
+    async def fake_publish(subject, payload):  # type: ignore[no-untyped-def]
+        pass
+
+    monkeypatch.setattr(ingestion, "call", fake_call)
+    monkeypatch.setattr(ingestion.bus, "publish", fake_publish)
+
+    ctx = {"document_id": "d1", "kb_id": "kb1", "chunks": [_chunk("c1", "ambiguous text")]}
+    with pytest.raises(ingestion.SagaPause):
+        await ingestion._detect_step(ctx)
+
+    # ...but a resumed (confirmed) job proceeds without pausing.
+    ctx["confirmed"] = True
+    await ingestion._detect_step(ctx)  # must not raise
+    assert ctx["domain"] == "generic"
+
+
+@pytest.mark.asyncio
+async def test_confirm_resumes_a_held_job(monkeypatch: pytest.MonkeyPatch) -> None:
+    # /confirm pops the paused job and re-runs the saga with confirmed=true (R55, M-3).
+    resumed: list[dict] = []
+
+    async def fake_run(data, headers):  # type: ignore[no-untyped-def]
+        import json
+        resumed.append(json.loads(data))
+
+    monkeypatch.setattr(ingestion, "_run_saga", fake_run)
+    ingestion._paused_jobs["d9"] = {"document_id": "d9", "kb_id": "kb1", "content_b64": "x"}
+
+    await ingestion._on_confirm(b'{"document_id": "d9"}', {})
+    assert resumed and resumed[0]["confirmed"] is True
+    assert "d9" not in ingestion._paused_jobs  # popped
+
+    # A confirm with no held job is a no-op (e.g. after a restart), not a crash.
+    await ingestion._on_confirm(b'{"document_id": "missing"}', {})

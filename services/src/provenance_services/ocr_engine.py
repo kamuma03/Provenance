@@ -34,7 +34,9 @@ class OcrEngine:
 
         pdf = pdfium.PdfDocument(content)
         try:
-            pil = pdf[page_index].render(scale=RENDER_SCALE).to_pil()
+            page = pdf[page_index]
+            pw, ph = float(page.get_width()), float(page.get_height())  # PDF-point page size
+            pil = page.render(scale=RENDER_SCALE).to_pil()
         finally:
             pdf.close()
 
@@ -47,6 +49,7 @@ class OcrEngine:
                 page=page_index,
                 x0=min(xs) / RENDER_SCALE, y0=min(ys) / RENDER_SCALE,
                 x1=max(xs) / RENDER_SCALE, y1=max(ys) / RENDER_SCALE,
+                page_width=pw, page_height=ph,  # carry page dims for citation scaling (L-10)
             )
             out.append((text, bbox))
         return out
