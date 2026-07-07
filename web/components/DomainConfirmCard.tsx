@@ -22,7 +22,9 @@ export default function DomainConfirmCard({
     <div className="domain-confirm">
       <p>
         Detected domain: <strong>{detected}</strong>{" "}
-        <span className="muted">({Math.round(confidence * 100)}% confidence)</span>
+        {confidence > 0 && (
+          <span className="muted">({Math.round(confidence * 100)}% confidence)</span>
+        )}
       </p>
 
       {changing && (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import DomainConfirmCard from "@/components/DomainConfirmCard";
 import SagaStepper from "@/components/SagaStepper";
 import {
@@ -40,6 +40,10 @@ export default function IngestPage() {
   const [stages, setStages] = useState<StageView[]>(freshStages());
   const [confirm, setConfirm] = useState<{ detected: string; confidence: number } | null>(null);
 
+  // Abort any in-flight SSE feed if the user navigates away mid-ingest.
+  const abortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => abortRef.current?.abort(), []);
+
   async function handleCreateKb() {
     const { id } = await createKb(kbName, domain);
     setKbId(id);
@@ -71,10 +75,13 @@ export default function IngestPage() {
           confidence: evt.detection_confidence ?? 0,
         });
       } else if (evt.status === "done") {
+        setConfirm(null);
         setStages((prev) => prev.map((s) => ({ ...s, state: "done" })));
       } else if (evt.status === "failed") {
         setStages((prev) => {
-          const i = prev.findIndex((s) => s.state === "active");
+          // Flag the active stage, or (failure between stages) the first not-yet-done one.
+          let i = prev.findIndex((s) => s.state === "active");
+          if (i === -1) i = prev.findIndex((s) => s.state !== "done");
           return prev.map((s, j) => (j === i ? { ...s, state: "failed" } : s));
         });
       }
@@ -91,10 +98,14 @@ export default function IngestPage() {
       const b64 = await fileToBase64(file);
       const { document_id } = await uploadDocument(kbId, file.name, b64, tier);
       setDocId(document_id);
-      // Live feed replaces the old 40× poll loop (R-BE-7 / R-UI-5).
+      const controller = new AbortController();
+      abortRef.current = controller;
+      // Live feed replaces the old 40× poll loop (R-BE-7 / R-UI-5). It stays open across an
+      // awaiting_confirm pause and carries the resumed saga through to done/failed.
       await streamDocumentEvents(document_id, {
         onStatus: onEvent,
         onError: () => setStatus("connection to the ingest feed was lost"),
+        signal: controller.signal,
       });
     } catch (e) {
       setStatus(`error: ${String(e)}`);
@@ -105,14 +116,12 @@ export default function IngestPage() {
 
   async function handleConfirm(override?: string) {
     if (!docId) return;
+    // `awaiting_confirm` is NOT a terminal state, so the feed opened in handleUpload is still
+    // live — it will carry the resumed saga to completion. Opening a second stream here would
+    // replay a stale `awaiting_confirm` snapshot and re-stick the confirm card. Just resume.
     setConfirm(null);
     setStatus("confirming…");
     await confirmDocument(docId, override);
-    // The saga resumes; a fresh feed carries the remaining stages to completion.
-    await streamDocumentEvents(docId, {
-      onStatus: onEvent,
-      onError: () => setStatus("connection to the ingest feed was lost"),
-    });
   }
 
   return (

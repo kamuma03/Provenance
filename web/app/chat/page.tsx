@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import AgentPipeline from "@/components/AgentPipeline";
 import EntityGraph from "@/components/EntityGraph";
 import KbSelector from "@/components/KbSelector";
@@ -42,6 +42,9 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
   const [busy, setBusy] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => () => abortRef.current?.abort(), []); // abort an in-flight stream on unmount
 
   useEffect(() => {
     listKbs()
@@ -66,6 +69,7 @@ export default function ChatPage() {
       { query, text: "", answer: null, evidence: null, stages: freshStages(), phase: "running" },
     ]);
     const controller = new AbortController();
+    abortRef.current = controller;
     try {
       await streamQuery(scope, query, {
         signal: controller.signal,
@@ -77,11 +81,11 @@ export default function ChatPage() {
             answer,
             evidence,
             phase: "done",
-            // Truthful pipeline: a refusal leaves the Critic blocked; otherwise all stages done.
+            // Truthful pipeline (core constraint #5): only resolve the terminal signal — a
+            // refusal blocks the Critic. Every other stage keeps the state its own SSE event
+            // reported, so an un-run stage is never painted green.
             stages: t.stages.map((s) =>
-              s.name === "critic" && answer.refused
-                ? { ...s, state: "blocked" }
-                : { ...s, state: "done" },
+              s.name === "critic" && answer.refused ? { ...s, state: "blocked" } : s,
             ),
           })),
         onError: (err) =>
