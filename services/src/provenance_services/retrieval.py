@@ -41,11 +41,37 @@ def _to_chunk(h: QueryHit) -> ScoredChunk:
     return ScoredChunk(chunk_id=h.chunk_id, text=h.text, page=page, bbox=bbox, score=h.score)
 
 
-async def retrieve(kb_id: str, query: str, deps: RetrievalDeps, k: int = 5) -> EvidenceSet:
-    """Resolve a query to an EvidenceSet (R30). Vector floor + additive graph lift (R25)."""
+async def retrieve(
+    kb_id: str | None = None,
+    query: str = "",
+    deps: RetrievalDeps | None = None,
+    k: int = 5,
+    *,
+    kb_ids: list[str] | None = None,
+) -> EvidenceSet:
+    """Resolve a query to an EvidenceSet (R30). Vector floor + additive graph lift (R25).
+
+    Accepts either a single ``kb_id`` (legacy) or a ``kb_ids`` list (multi-KB, R38). The two
+    forms are unified through ``scope``: **``kb_ids=[x]`` is byte-identical to ``kb_id=x``**
+    (fan-out over one KB is just that KB), which protects the eval gate (core constraint #1).
+    Across several KBs the hits and linked entities are unioned in KB order, deduped by id.
+    """
+    if deps is None:  # deps is positional-3 for the legacy form; guard the keyword form
+        raise ValueError("retrieve requires deps")
+    scope = kb_ids if kb_ids is not None else ([kb_id] if kb_id is not None else [])
     span = trace.get_current_span()
     vector = await deps.embed(query)
-    hits = await deps.hybrid(kb_id, vector, query, k * 3) if vector else []
+
+    # Vector floor fanned out across the selected KBs, unioned in scope order and deduped by
+    # chunk_id (globally unique) — for a single KB this is exactly the legacy hit list (parity).
+    hits: list[QueryHit] = []
+    if vector:
+        seen_hits: set[str] = set()
+        for kb in scope:
+            for h in await deps.hybrid(kb, vector, query, k * 3):
+                if h.chunk_id not in seen_hits:
+                    seen_hits.add(h.chunk_id)
+                    hits.append(h)
 
     # Rerank is a refinement, not the floor: a Model-service hiccup must not throw away good
     # hybrid hits — fall back to the hybrid fusion order (R25, review H-6).
@@ -60,7 +86,11 @@ async def retrieve(kb_id: str, query: str, deps: RetrievalDeps, k: int = 5) -> E
     # Additive graph lift; empty-expansion ladder governs the entity side (R27). A Graph-
     # service outage degrades to vector-only evidence — never fails the whole query (R25/H-6).
     try:
-        linked = await deps.link(kb_id, query)
+        linked = []
+        for kb in scope:
+            for e in await deps.link(kb, query):
+                if e not in linked:
+                    linked.append(e)
         expanded = await deps.expand(linked) if linked else []
     except Exception as exc:
         log.warning("graph lift failed; vector floor stands: %s", exc)

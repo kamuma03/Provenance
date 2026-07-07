@@ -7,7 +7,7 @@ Each task notes its layer, dependencies, and the requirement(s) it satisfies.
 - [ ] **T1** Bundle IBM Plex (Sans/Serif/Mono) locally; rewrite `web/app/globals.css` tokens to the mockup palette (`#5e8bff`/`#35c990`/`#f0a83a`); nav shell. — FE — *R-UI-9 setup*
 - [ ] **T2** Rebuild landing page `web/app/page.tsx` (hero + answer→source visual). — FE — deps: T1 — *R-UI-9*
 - [x] **T3** `Catalog.list_kb()` + gateway `GET /kb`; test. — BE — *R-BE-1* ✅ green
-- [ ] **T4** Multi-KB query path: `QueryRequest.kb_ids[]` (alias `kb_id`) through gateway `/query`+`/query/stream`, query_agent `/answer`+`/retrieve`, `run_crew`, `retrieval.retrieve()` fan-out+union; regen contracts; parity + cross-KB tests; **re-run eval gate**. — BE — deps: T3 — *R-BE-2* ⚠️ eval-sensitive
+- [x] **T4** Multi-KB query path: `QueryRequest.kb_ids[]` (alias `kb_id`) through gateway `/query`+`/query/stream`, query_agent `/answer`+`/retrieve`, `run_crew`, `retrieval.retrieve()` fan-out+union; regen contracts; parity + cross-KB tests; **re-run eval gate**. — BE — deps: T3 — *R-BE-2* ⚠️ eval-sensitive ✅ green (parity + eval gate re-run)
 - [ ] **T5** `KbSelector` (multi-select) component; wire chat + ingest to it (drop raw paste). — FE — deps: T1,T3,T4 — *R-UI-1*
 - [ ] **T6** Chat state → `turns[]`; multi-turn thread + composer; lift selected-citation to page level. — FE — deps: T1 — *R-UI-7*
 
@@ -42,6 +42,7 @@ Each task notes its layer, dependencies, and the requirement(s) it satisfies.
 ## Progress log
 - Red state established: 17 backend tests + 9 web test files (Vitest harness added). Existing 41 services tests green.
 - Slice 1 (commit): R-BE-1 (GET /kb + list_kb), R-BE-3 (Answer.ungrounded_claims + crew), R-BE-5 (GET /chunks + get_chunk), R-BE-9 contract (Subgraph model + EvidenceSet.subgraph). Contracts regenerated (N9 drift gate green).
+- Slice 3 (commit): R-BE-2 (multi-KB kb_ids fan-out; kb_ids=[one] byte-identical to kb_id — eval gate 22 green).
 - Slice 2 (commit): R-BE-8 (confirm-with-override: gateway body + ingestion resume + detect honors override).
 - Status: services suite 113 passed / 11 UI-red remaining / 0 regressions; ruff clean.
 - Remaining backend reds: R-BE-2 (multi-KB thread ⚠ eval-sensitive), R-BE-4 (live streaming ⚠ eval-sensitive), R-BE-6 (saga per-stage), R-BE-7 (ingest SSE route), R-BE-9 populate. Plus all 9 web component builds (T2,T5,T6,T9,T11,T12,T13,T15,T16,T18,T20).

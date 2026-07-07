@@ -270,6 +270,7 @@ async def run_crew(
     kb_id: str,
     retrieve_fn: RetrieveFn,
     *,
+    kb_ids: list[str] | None = None,
     planner: Planner | None = None,
     synthesizer: Synthesizer | None = None,
     critic: Critic | None = None,
@@ -278,12 +279,15 @@ async def run_crew(
     """Plan → retrieve → (synthesize → critique)* with a hard iteration bound (R32).
 
     Each agent is resolved from the per-task LLM router unless explicitly injected (A2).
+    ``kb_ids`` (R38) scopes the Plan across several KBs; ``retrieve_fn`` owns the per-subquery
+    fan-out, so a single-KB scope is byte-identical to the legacy ``[kb_id]`` path.
     """
     planner = planner or Planner(get_llm("planner"))
     synthesizer = synthesizer or Synthesizer(get_llm("synthesizer"))
     critic = critic or Critic(get_llm("critic"))
 
-    plan = await planner.plan(query, [kb_id])
+    scope = kb_ids if kb_ids else [kb_id]
+    plan = await planner.plan(query, scope)
     evidences = [await retrieve_fn(kb_id, sq.text) for sq in plan.subqueries]
 
     verdict: Verdict | None = None

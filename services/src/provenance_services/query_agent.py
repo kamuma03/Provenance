@@ -63,14 +63,22 @@ def _deps() -> RetrievalDeps:
     return RetrievalDeps(embed=_embed, hybrid=_hybrid, rerank=_rerank, link=_link, expand=_expand)
 
 
+def _scope(body: dict[str, object]) -> list[str]:
+    """Normalize the request's KB scope: `kb_ids` list wins; else legacy `kb_id` → [kb_id]."""
+    kb_ids = body.get("kb_ids")
+    if isinstance(kb_ids, list) and kb_ids:
+        return [str(k) for k in kb_ids]
+    return [str(body.get("kb_id", "default"))]
+
+
 @app.post("/retrieve", tags=["query"])
 async def retrieve_endpoint(req: Request) -> dict[str, object]:
     """Resolve a query to an EvidenceSet via the retrieval core (R30)."""
     body = await req.json()
-    kb_id = body.get("kb_id", "default")
     query = body.get("query", "")
+    kb_ids = _scope(body)
     with tracer("query-agent").start_as_current_span("query.retrieve") as span:
-        evidence = await retrieve(kb_id, query, _deps(), k=int(body.get("k", 5)))
+        evidence = await retrieve(query=query, kb_ids=kb_ids, deps=_deps(), k=int(body.get("k", 5)))
         span.set_attribute("retrieve.chunks", len(evidence.chunks))
         span.set_attribute("retrieve.graph_expanded", evidence.graph_expanded)
         return cast("dict[str, object]", evidence.model_dump())
@@ -80,20 +88,22 @@ async def retrieve_endpoint(req: Request) -> dict[str, object]:
 async def answer(req: Request) -> dict[str, object]:
     """Run the agentic crew: plan → retrieve → (synthesize → critique)* → cited Answer (R29–R33)."""
     body = await req.json()
-    kb_id = body.get("kb_id", "default")
     query = body.get("query", "")
+    kb_ids = _scope(body)
 
     # Capture the evidence the crew actually retrieves so the caller doesn't retrieve a second
     # time, and so the returned evidence matches the answer's citations (R36, review M-15).
+    # The closure captures the full KB scope so each subquery fans out over every selected KB
+    # (R38); run_crew's per-subquery `kb` arg is informational — parity holds for a single KB.
     collected: list[EvidenceSet] = []
 
     async def _retrieve(kb: str, subquery: str) -> EvidenceSet:
-        ev = await retrieve(kb, subquery, _deps())
+        ev = await retrieve(query=subquery, kb_ids=kb_ids, deps=_deps())
         collected.append(ev)
         return ev
 
     with tracer("query-agent").start_as_current_span("query.answer") as span:
-        ans = await run_crew(query, kb_id, _retrieve)
+        ans = await run_crew(query, kb_ids[0], _retrieve, kb_ids=kb_ids)
         seen: set[str] = set()
         chunks: list[ScoredChunk] = []
         entity_ids: list[str] = []

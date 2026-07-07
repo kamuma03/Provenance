@@ -32,7 +32,15 @@ log = logging.getLogger("gateway")
 # (review M-5). Internal service-to-service endpoints stay dict-based for now — see the plan.
 class QueryRequest(BaseModel):
     query: str
-    kb_id: str = "default"
+    # Multi-KB scope (R38/R-BE-2). `kb_id` stays for a dual-running release and is normalized
+    # into `kb_ids=[kb_id]`; `kb_ids=[x]` retrieves byte-identically to the legacy `kb_id=x`.
+    kb_id: str | None = None
+    kb_ids: list[str] | None = None
+
+    def scope(self) -> list[str]:
+        if self.kb_ids:
+            return list(self.kb_ids)
+        return [self.kb_id] if self.kb_id else ["default"]
 
 
 class KbRequest(BaseModel):
@@ -192,7 +200,7 @@ async def kb_stats(kb_id: str) -> dict[str, object]:
 
 @app.post("/query", tags=["gateway"])
 async def query(body: QueryRequest) -> dict[str, object]:
-    payload = {"query": body.query, "kb_id": body.kb_id}
+    payload = {"query": body.query, "kb_ids": body.scope()}
     with tracer("gateway").start_as_current_span("gateway.query"):
         return await call("query", "/answer", payload)
 
@@ -200,7 +208,7 @@ async def query(body: QueryRequest) -> dict[str, object]:
 @app.post("/query/stream", tags=["gateway"])
 async def query_stream(body: QueryRequest) -> StreamingResponse:
     """Stream the answer over SSE (R35): status → tokens → done{answer, evidence}."""
-    payload = {"kb_id": body.kb_id, "query": body.query}
+    payload = {"kb_ids": body.scope(), "query": body.query}
 
     async def gen() -> AsyncIterator[str]:
         try:
