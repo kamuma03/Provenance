@@ -127,6 +127,13 @@ async def _detect_step(c: Ctx) -> None:
     chunks = cast("list[Chunk]", c["chunks"])
     sample = "\n".join(ch.text for ch in chunks)[:_DETECT_SAMPLE_CHARS]
     c["sample"] = sample
+    # A user override ("Change" on the confirm card) pins the chosen domain — trust it and
+    # skip re-detection/pause (R55/R-BE-8).
+    override = c.get("domain_id")
+    if override:
+        c["domain"] = override
+        c["detection_confidence"] = 1.0
+        return
     resp = await call("extraction", "/detect", {"text": sample})
     c["domain"] = resp.get("domain", "generic")
     c["detection_confidence"] = resp.get("confidence")
@@ -282,7 +289,11 @@ async def _on_confirm(data: bytes, _headers: dict[str, str]) -> None:
         if job is None:
             log.warning("confirm for %s but no paused job is held", doc_id)
             return
-        await _run_saga(json.dumps({**job, "confirmed": True}).encode(), {})
+        # An optional domain override ("Change") pins the user's choice on resume (R-BE-8/R55).
+        resumed = {**job, "confirmed": True}
+        if evt.get("domain_id"):
+            resumed["domain_id"] = evt["domain_id"]
+        await _run_saga(json.dumps(resumed).encode(), {})
     except Exception:
         log.exception("confirm handler error")
 

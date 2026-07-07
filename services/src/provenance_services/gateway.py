@@ -113,6 +113,19 @@ async def create_kb(body: KbRequest) -> dict[str, str]:
     return {"id": kb_id}
 
 
+@app.get("/kb", tags=["gateway"])
+async def list_kb() -> list[dict[str, object]]:
+    """List KBs for the chat/ingest selector (R-BE-1 / R-UI-1)."""
+    return await catalog.list_kb()
+
+
+@app.get("/chunks/{chunk_id}", tags=["gateway"])
+async def get_chunk(chunk_id: str) -> JSONResponse:
+    """Fetch one chunk (text + page + bbox) for the source inspector (R-BE-5 / R-UI-3)."""
+    chunk = await catalog.get_chunk(chunk_id)
+    return JSONResponse(status_code=200 if chunk else 404, content=chunk or {"error": "not found"})
+
+
 @app.post("/kb/{kb_id}/documents", tags=["gateway"])
 async def upload_document(kb_id: str, req: Request) -> JSONResponse:
     """Upload (R5): persist queued Document, enqueue saga job with content, return 202."""
@@ -154,9 +167,21 @@ async def get_document(doc_id: str) -> JSONResponse:
 
 
 @app.post("/documents/{doc_id}/confirm", tags=["gateway"])
-async def confirm_document(doc_id: str) -> dict[str, str]:
-    """Confirm a paused (awaiting_confirm) document so ingestion resumes it (R9/R55, M-3)."""
-    await bus.publish(CONFIRM_SUBJECT, json.dumps({"document_id": doc_id}).encode())
+async def confirm_document(doc_id: str, req: Request) -> dict[str, str]:
+    """Confirm a paused (awaiting_confirm) document so ingestion resumes it (R9/R55, M-3).
+
+    An optional `domain_id` in the body overrides the detected domain (the UI's "Change"),
+    so the user's choice is pinned instead of the low-confidence detection (R-BE-8).
+    """
+    try:
+        body = await req.json()
+    except Exception:
+        body = {}
+    msg: dict[str, str] = {"document_id": doc_id}
+    domain_id = (body or {}).get("domain_id")
+    if domain_id:
+        msg["domain_id"] = domain_id
+    await bus.publish(CONFIRM_SUBJECT, json.dumps(msg).encode())
     return {"document_id": doc_id, "status": "confirming"}
 
 

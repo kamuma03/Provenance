@@ -304,8 +304,10 @@ async def run_crew(
         last_text = answer.text
 
     # Strict whole-answer refusal on exhaustion (R32): never release ungrounded content.
+    # Surface the Critic's specific ungrounded claims so the UI refusal card can name them (R31).
     return Answer(
         text="Unable to produce a fully grounded answer.",
         refused=True,
         refusal_reason=f"claims remained ungrounded after {max_iterations} iterations",
+        ungrounded_claims=list(verdict.ungrounded_claims) if verdict else [],
     )

@@ -41,6 +41,29 @@ class ScoredChunk(BaseModel):
     score: float
 
 
+class SubgraphNode(BaseModel):
+    """A named, typed entity used in an answer (R37)."""
+
+    id: str
+    name: str
+    type: str
+
+
+class SubgraphEdge(BaseModel):
+    """A typed relation between two entities used in an answer (R37)."""
+
+    src: str
+    dst: str
+    type: str
+
+
+class Subgraph(BaseModel):
+    """The per-answer entity subgraph the UI renders (R37) — nodes + edges, not raw ids."""
+
+    nodes: list[SubgraphNode] = Field(default_factory=list)
+    edges: list[SubgraphEdge] = Field(default_factory=list)
+
+
 class EvidenceSet(BaseModel):
     """Retriever output for one subquery (R30)."""
 
@@ -48,6 +71,7 @@ class EvidenceSet(BaseModel):
     chunks: list[ScoredChunk] = Field(default_factory=list)
     entity_ids: list[str] = Field(default_factory=list)
     graph_expanded: bool = False  # whether additive graph lift contributed (R25)
+    subgraph: Subgraph = Field(default_factory=Subgraph)  # named/typed nodes+edges (R37)
 
 
 class Citation(BaseModel):
@@ -71,6 +95,7 @@ class Answer(BaseModel):
     claims: list[Claim] = Field(default_factory=list)
     refused: bool = False  # honest refusal (R39) or strict-refusal exhaustion (R32)
     refusal_reason: str | None = None
+    ungrounded_claims: list[str] = Field(default_factory=list)  # Critic verdict, surfaced (R31)
 
 
 class CriticStatus(StrEnum):

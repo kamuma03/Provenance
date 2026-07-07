@@ -36,6 +36,24 @@ export interface Answer {
   claims?: Claim[];
   refused?: boolean;
   refusal_reason?: string | null;
+  ungrounded_claims?: string[];
+}
+
+export interface SubgraphNode {
+  id: string;
+  name: string;
+  type: string;
+}
+
+export interface SubgraphEdge {
+  src: string;
+  dst: string;
+  type: string;
+}
+
+export interface Subgraph {
+  nodes?: SubgraphNode[];
+  edges?: SubgraphEdge[];
 }
 
 export interface EvidenceSet {
@@ -43,4 +61,5 @@ export interface EvidenceSet {
   chunks?: ScoredChunk[];
   entity_ids?: string[];
   graph_expanded?: boolean;
+  subgraph?: Subgraph;
 }

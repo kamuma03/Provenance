@@ -57,7 +57,8 @@ def test_confirm_endpoint_forwards_domain_override(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(gateway.bus, "publish", fake_publish)
     r = client.post("/documents/d1/confirm", json={"domain_id": "legal_contracts"})
     assert r.status_code == 200
-    assert published and published[0].get("domain_id") == "legal_contracts"  # red: body ignored today
+    # red until the confirm route reads the body: currently the domain override is ignored.
+    assert published and published[0].get("domain_id") == "legal_contracts"
 
 
 @pytest.mark.asyncio

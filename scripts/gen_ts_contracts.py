@@ -16,11 +16,24 @@ import types
 import typing
 from pathlib import Path
 
-from provenance_contracts import Answer, BBox, Citation, Claim, EvidenceSet, ScoredChunk
+from provenance_contracts import (
+    Answer,
+    BBox,
+    Citation,
+    Claim,
+    EvidenceSet,
+    ScoredChunk,
+    Subgraph,
+    SubgraphEdge,
+    SubgraphNode,
+)
 from pydantic import BaseModel
 
 # The exact set of cross-service models the web depends on, in dependency order.
-MODELS: list[type[BaseModel]] = [BBox, Citation, ScoredChunk, Claim, Answer, EvidenceSet]
+MODELS: list[type[BaseModel]] = [
+    BBox, Citation, ScoredChunk, Claim, Answer,
+    SubgraphNode, SubgraphEdge, Subgraph, EvidenceSet,
+]
 OUT = Path(__file__).resolve().parents[1] / "web" / "lib" / "contracts.gen.ts"
 
 _SCALARS = {str: "string", int: "number", float: "number", bool: "boolean"}

@@ -148,3 +148,27 @@ class Catalog:
                 "SELECT id, kb_id, source, status FROM document WHERE id = $1", doc_id
             )
             return dict(row) if row else None
+
+    async def list_kb(self) -> list[dict[str, object]]:
+        """List knowledge bases so the UI can offer a selector instead of a raw id (R-BE-1)."""
+        await self._ensure()
+        if self._pool is None:
+            return []
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT id, name, domain_id, created_at FROM knowledge_base "
+                "ORDER BY created_at DESC"
+            )
+            return [dict(r) for r in rows]
+
+    async def get_chunk(self, chunk_id: str) -> dict[str, object] | None:
+        """Fetch one chunk's text + page + bbox for the source inspector (R-BE-5)."""
+        await self._ensure()
+        if self._pool is None:
+            return None
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT id, document_id, kb_id, text, page, bbox FROM chunk WHERE id = $1",
+                chunk_id,
+            )
+            return dict(row) if row else None

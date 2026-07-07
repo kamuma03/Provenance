@@ -24,6 +24,9 @@ from .messages import (
     EvidenceSet,
     Plan,
     ScoredChunk,
+    Subgraph,
+    SubgraphEdge,
+    SubgraphNode,
     Subquery,
     SubqueryType,
     Verdict,
@@ -46,7 +49,8 @@ __all__ = [
     "KnowledgeBase", "ParseMethod", "ProcessingTier", "Relation",
     # messages
     "Answer", "Citation", "Claim", "CriticStatus", "EvidenceSet", "Plan",
-    "ScoredChunk", "Subquery", "SubqueryType", "Verdict",
+    "ScoredChunk", "Subgraph", "SubgraphEdge", "SubgraphNode", "Subquery",
+    "SubqueryType", "Verdict",
     # extraction
     "EntityCandidate", "ExtractionResult", "RelationCandidate",
     # parse
