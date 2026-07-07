@@ -71,73 +71,74 @@ Each requirement has a binary acceptance criterion and a verification method
 
 ### UI / product requirements
 
-- `[ ]` **R-UI-1 · KB selector (multi)** — the user picks one or more KBs from a
+- `[x]` **R-UI-1 · KB selector (multi)** — the user picks one or more KBs from a
   list instead of pasting an id. *Accept:* the selector is populated from `GET /kb`;
   selecting KB(s) scopes the query (a KB-specific question is answerable only when
   its KB is selected). (R38)
-- `[ ]` **R-UI-2 · Live agent pipeline** — the chat shows the 4 crew stages with
+- `[x]` **R-UI-2 · Live agent pipeline** — the chat shows the 4 crew stages with
   live state and sub-detail; the verified answer then streams token-by-token.
   *Accept:* a query emits ≥4 named stage events (`planner|retriever|critic|synthesizer`)
   over SSE, each rendered in order; a refused query shows `critic` in a `blocked`
   state; answer tokens arrive **only after** a `critic ok` event; no unverified text
   is shown. (R35 + R31/R32)
-- `[ ]` **R-UI-3 · Source inspector** — clicking a claim/citation highlights its
+- `[x]` **R-UI-3 · Source inspector** — clicking a claim/citation highlights its
   page + bbox. *Accept:* clicking claim 1 renders a highlight at the stored bbox,
   normalized by `page_width/height`; falls back to US-Letter only if dims absent. (R36)
-- `[ ]` **R-UI-4 · Honest-refusal card** — a refused answer shows the Critic verdict
+- `[x]` **R-UI-4 · Honest-refusal card** — a refused answer shows the Critic verdict
   and the specific ungrounded claim(s) + suggested queries. *Accept:* an out-of-corpus
   query renders the refusal card with `refusal_reason` and ≥1 ungrounded claim from the
   Critic verdict; no fabricated citation. (R39/R31)
-- `[ ]` **R-UI-5 · Saga stepper** — ingestion shows a 7-stage stepper advancing live.
+- `[x]` **R-UI-5 · Saga stepper** — ingestion shows a 7-stage stepper advancing live.
   *Accept:* uploading a doc advances parse→chunk→detect→extract→graph→embed→vector via
   a live SSE feed (no polling), ending Ready or Failed.
-- `[ ]` **R-UI-6 · Detect-but-confirm card** — a domain card with Confirm / Change.
+- `[x]` **R-UI-6 · Detect-but-confirm card** — a domain card with Confirm / Change.
   *Accept:* a doc pauses at `awaiting_confirm`, the card shows detected domain +
   confidence; Confirm resumes; Change overrides the schema and resumes with the chosen
   domain recorded. (R55/R9)
-- `[ ]` **R-UI-7 · Multi-turn chat** — multiple turns in one session. *Accept:* two
+- `[x]` **R-UI-7 · Multi-turn chat** — multiple turns in one session. *Accept:* two
   sequential questions each render their own answer + inspector state without clobbering
   the first.
-- `[ ]` **R-UI-8 · Per-answer entity graph** — named, typed nodes + edges from the
+- `[x]` **R-UI-8 · Per-answer entity graph** — named, typed nodes + edges from the
   answer's subgraph. *Accept:* the graph renders entity names/types and ≥1 edge for a
   relational answer, sourced from `evidence.subgraph`. (R37)
-- `[ ]` **R-UI-9 · Landing page** — leads with the value proposition. *Accept:* `/`
+- `[x]` **R-UI-9 · Landing page** — leads with the value proposition. *Accept:* `/`
   renders the value-prop hero + the answer→source visual and links to Ingest/Chat.
 
 ### Backend enabling requirements
 
-- `[ ]` **R-BE-1 · List KBs** — `GET /kb` returns `[{id,name,domain_id,created_at}]`
+- `[x]` **R-BE-1 · List KBs** — `GET /kb` returns `[{id,name,domain_id,created_at}]`
   via a new `Catalog.list_kb()`.
-- `[ ]` **R-BE-2 · Multi-KB query path** — `QueryRequest.kb_ids: list[str]` (alias
+- `[x]` **R-BE-2 · Multi-KB query path** — `QueryRequest.kb_ids: list[str]` (alias
   `kb_id`) threaded through gateway `/query`+`/query/stream`, query_agent
   `/answer`+`/retrieve`, `run_crew`, and `retrieval.retrieve()` (fan-out + union).
   *Accept:* `kb_ids=[x]` is byte-identical to today's `kb_id=x`; a cross-KB query
   retrieves from all selected KBs.
-- `[ ]` **R-BE-3 · Critic verdict surfaced** — the refusal payload carries the
+- `[x]` **R-BE-3 · Critic verdict surfaced** — the refusal payload carries the
   ungrounded claim(s) (extend `Answer` with an optional `ungrounded_claims`/`verdict`).
 - `[x]` **R-BE-4 · Live crew streaming** — gateway `/query/stream` (the browser-facing SSE
   edge) emits the four crew stage events in order (`planner|retriever|critic|synthesizer`)
   around a single fully-verified `/answer` call, then streams the verified answer text
   token-by-token **only after** the `critic` stage. Chunking preserves exact bytes
-  (`\S+\s*`), so the stream reconstructs `answer.text` character-for-character.
+  (`\s*\S+\s*`, incl. leading whitespace), so the stream reconstructs `answer.text`
+  character-for-character.
   *Decision (2026-07-07):* orchestrated at the gateway edge rather than a separate
   query_agent `/answer/stream` proxy — the acceptance tests assert on the gateway SSE body,
   R53 keeps crew execution as one verified call in query_agent, and this makes "no unverified
   token reaches the browser" true *by construction* (the edge can only stream text `/answer`
   already verified). See todo.md decisions log.
-- `[ ]` **R-BE-5 · Chunk fetch** — `GET /chunks/{id}` returns `{id,text,page,bbox,...}`
+- `[x]` **R-BE-5 · Chunk fetch** — `GET /chunks/{id}` returns `{id,text,page,bbox,...}`
   via `Catalog.get_chunk()` (feeds the inspector; schematic works without text but text
   enriches it).
-- `[ ]` **R-BE-6 · Per-stage saga status** — additive `progress` (list of
+- `[x]` **R-BE-6 · Per-stage saga status** — additive `progress` (list of
   `{stage,state,detail}`) on the document, exposed via a live feed; publish the
   currently-silent chunk/graph/vector stages. `document.status` string retained.
-- `[ ]` **R-BE-7 · Live ingest SSE** — gateway `GET /documents/{id}/events` forwards
+- `[x]` **R-BE-7 · Live ingest SSE** — gateway `GET /documents/{id}/events` forwards
   NATS `ingest.status`; the ingest page consumes it (drops the 40× poll loop).
-- `[ ]` **R-BE-8 · Confirm-with-override** — `POST /documents/{id}/confirm` accepts an
+- `[x]` **R-BE-8 · Confirm-with-override** — `POST /documents/{id}/confirm` accepts an
   optional `domain_id`/`schema_version`; the saga resumes honoring it and records the choice.
-- `[ ]` **R-BE-9 · Per-answer subgraph** — `EvidenceSet.subgraph{nodes[{id,name,type}],
+- `[x]` **R-BE-9 · Per-answer subgraph** — `EvidenceSet.subgraph{nodes[{id,name,type}],
   edges[{src,dst,type}]}`; graph `/expand` returns names/types/edges; the crew populates it.
-- `[ ]` **R-BE-10 · Doc provenance exposed** — `GET /documents/{id}` widened with
+- `[x]` **R-BE-10 · Doc provenance exposed** — `GET /documents/{id}` widened with
   detected_domain, detection_confidence, parse_method, ocr_engine, trace_id.
 
 ---
