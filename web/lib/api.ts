@@ -1,4 +1,4 @@
-import type { Answer, Evidence, StreamHandlers } from "./types";
+import type { Answer, Evidence, Kb, StreamHandlers } from "./types";
 
 const BASE = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://localhost:8000";
 
@@ -14,6 +14,13 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
 
 export async function createKb(name: string, domainId: string): Promise<{ id: string }> {
   return postJson("/kb", { name, domain_id: domainId });
+}
+
+/** List knowledge bases for the selector (R-BE-1 / R-UI-1). */
+export async function listKbs(): Promise<Kb[]> {
+  const res = await fetch(`${BASE}/kb`);
+  if (!res.ok) throw new Error(`kb → ${res.status}`);
+  return res.json();
 }
 
 export async function uploadDocument(
@@ -39,9 +46,11 @@ export async function kbStats(kbId: string): Promise<{ entity_count: number }> {
   return res.json();
 }
 
-/** Consume the SSE stream from POST /query/stream (R35). */
+/** Consume the SSE stream from POST /query/stream (R35, R-BE-4): live crew stage events,
+ *  then the verified answer text token-by-token after the Critic approves. Multi-KB scope
+ *  (R38): pass the selected `kbIds`. */
 export async function streamQuery(
-  kbId: string,
+  kbIds: string[],
   query: string,
   handlers: StreamHandlers,
 ): Promise<void> {
@@ -49,7 +58,7 @@ export async function streamQuery(
     const res = await fetch(`${BASE}/query/stream`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ kb_id: kbId, query }),
+      body: JSON.stringify({ kb_ids: kbIds, query }),
       signal: handlers.signal,
     });
     if (!res.ok) throw new Error(`query/stream → ${res.status}`);
@@ -83,6 +92,7 @@ function dispatchEvent(raw: string, handlers: StreamHandlers): void {
   if (!data) return;
   const payload = JSON.parse(data);
   if (event === "status") handlers.onStatus?.(payload.phase);
+  else if (event === "stage") handlers.onStage?.(payload);
   else if (event === "token") handlers.onToken?.(payload.text);
   else if (event === "done") handlers.onDone?.(payload.answer as Answer, payload.evidence as Evidence);
   else if (event === "error") handlers.onError?.(new Error(payload.message ?? "stream error"));

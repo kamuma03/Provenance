@@ -5,19 +5,19 @@ Each task notes its layer, dependencies, and the requirement(s) it satisfies.
 
 ## Phase 0 — Foundation
 - [ ] **T1** Bundle IBM Plex (Sans/Serif/Mono) locally; rewrite `web/app/globals.css` tokens to the mockup palette (`#5e8bff`/`#35c990`/`#f0a83a`); nav shell. — FE — *R-UI-9 setup*
-- [ ] **T2** Rebuild landing page `web/app/page.tsx` (hero + answer→source visual). — FE — deps: T1 — *R-UI-9*
+- [x] **T2** Rebuild landing page `web/app/page.tsx` (hero + answer→source visual). — FE — deps: T1 — *R-UI-9*
 - [x] **T3** `Catalog.list_kb()` + gateway `GET /kb`; test. — BE — *R-BE-1* ✅ green
 - [x] **T4** Multi-KB query path: `QueryRequest.kb_ids[]` (alias `kb_id`) through gateway `/query`+`/query/stream`, query_agent `/answer`+`/retrieve`, `run_crew`, `retrieval.retrieve()` fan-out+union; regen contracts; parity + cross-KB tests; **re-run eval gate**. — BE — deps: T3 — *R-BE-2* ⚠️ eval-sensitive ✅ green (parity + eval gate re-run)
-- [ ] **T5** `KbSelector` (multi-select) component; wire chat + ingest to it (drop raw paste). — FE — deps: T1,T3,T4 — *R-UI-1*
-- [ ] **T6** Chat state → `turns[]`; multi-turn thread + composer; lift selected-citation to page level. — FE — deps: T1 — *R-UI-7*
+- [x] **T5** `KbSelector` (multi-select) component; wire chat + ingest to it (drop raw paste). — FE — deps: T1,T3,T4 — *R-UI-1*
+- [x] **T6** Chat state → `turns[]`; multi-turn thread + composer; lift selected-citation to page level. — FE — deps: T1 — *R-UI-7*
 
 ## Phase 1 — Provenance chat (1a / 1b)
 - [x] **T7** Surface Critic `ungrounded_claims` on the refusal payload (extend `Answer`); crew + gateway; regen contracts; test. — BE — *R-BE-3* ✅ green
 - [x] **T8** Live crew streaming: query_agent `/answer/stream` (SSE) emitting `planner|retriever|critic|synthesizer` stage events + **post-`ok`** answer tokens; gateway proxies through (replace fake word-split); **answer-bytes parity** test. — BE — deps: T4,T7 — *R-BE-4* ⚠️ enforces R31/R32 ✅ green (byte-parity + eval gate re-run)
-- [ ] **T9** `AgentPipeline` component (4 stages, active/done/blocked) + streamed-token rendering; extend `lib/api.ts` SSE handlers for named stages. — FE — deps: T6,T8 — *R-UI-2*
+- [x] **T9** `AgentPipeline` component (4 stages, active/done/blocked) + streamed-token rendering; extend `lib/api.ts` SSE handlers for named stages. — FE — deps: T6,T8 — *R-UI-2*
 - [x] **T10** `Catalog.get_chunk()` + gateway `GET /chunks/{id}`; test. — BE — *R-BE-5* ✅ green
-- [ ] **T11** `SourceInspector` (extends `CitationPanel`): schematic bbox highlight w/ real page dims; optional chunk text from T10. — FE — deps: T6,T10 — *R-UI-3*
-- [ ] **T12** `RefusalCard` (verdict + ungrounded claim + suggested-query chips). — FE — deps: T7 — *R-UI-4*
+- [x] **T11** `SourceInspector` (extends `CitationPanel`): schematic bbox highlight w/ real page dims; optional chunk text from T10. — FE — deps: T6,T10 — *R-UI-3*
+- [x] **T12** `RefusalCard` (verdict + ungrounded claim + suggested-query chips). — FE — deps: T7 — *R-UI-4*
 
 ## Phase 2 — Ingestion saga (1c)
 - [x] **T13** Per-stage saga status: additive `progress[{stage,state,detail}]` on document; publish silent chunk/graph/vector stages; keep `document.status` string; test. — BE — *R-BE-6*
@@ -29,7 +29,7 @@ Each task notes its layer, dependencies, and the requirement(s) it satisfies.
 
 ## Phase 3 — Graph + polish
 - [x] **T19** Per-answer subgraph (contract + retrieval populate + crew merge done; graph `/expand` real names/types deferred — see decisions log): `EvidenceSet.subgraph{nodes,edges}`; graph `/expand` returns names/types/edges; crew populates; regen contracts; test. — BE — *R-BE-9*
-- [ ] **T20** Upgrade `EntityGraph` to named/typed nodes + edges from `evidence.subgraph`. — FE — deps: T19 — *R-UI-8*
+- [x] **T20** Upgrade `EntityGraph` to named/typed nodes + edges from `evidence.subgraph`. — FE — deps: T19 — *R-UI-8*
 - [ ] **T21** Add Vitest + Testing Library; component tests for T2,T5,T9,T11,T12,T16,T18,T20 + streaming handlers. — FE/Test — deps: above
 - [ ] **T22** A11y pass (roles/aria on pipeline + stepper), empty/error/loading states, responsive check. — FE — deps: Phase 0–3
 
@@ -42,6 +42,7 @@ Each task notes its layer, dependencies, and the requirement(s) it satisfies.
 ## Progress log
 - Red state established: 17 backend tests + 9 web test files (Vitest harness added). Existing 41 services tests green.
 - Slice 1 (commit): R-BE-1 (GET /kb + list_kb), R-BE-3 (Answer.ungrounded_claims + crew), R-BE-5 (GET /chunks + get_chunk), R-BE-9 contract (Subgraph model + EvidenceSet.subgraph). Contracts regenerated (N9 drift gate green).
+- Slice 7 (commit): Frontend components green — landing (R-UI-9), KbSelector (R-UI-1), AgentPipeline (R-UI-2), SourceInspector (R-UI-3), RefusalCard (R-UI-4), SagaStepper (R-UI-5), DomainConfirmCard (R-UI-6), multi-turn ChatPage (R-UI-7), EntityGraph subgraph (R-UI-8). All 9 Vitest files pass (11 tests); tsc+eslint clean.
 - Slice 6 (commit): R-BE-9 populate (retrieval builds provenance subgraph nodes+expands_to edges; query_agent /answer merges per-subquery subgraphs). ALL backend reds green — 146 passed.
 - Slice 5 (commit): R-BE-6 (STAGES vocab + saga on_step per-stage publish + catalog.record_progress + gateway routing) & R-BE-7 (in-process SSE fan-out at /documents/{id}/events; snapshot+terminal close).
 - Slice 4 (commit): R-BE-4 (gateway-edge live streaming: 4 stage events + post-critic verified tokens; byte-parity + eval gate 22 green).
