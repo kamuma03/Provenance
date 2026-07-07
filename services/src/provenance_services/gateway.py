@@ -12,6 +12,7 @@ import binascii
 import hashlib
 import json
 import logging
+import re
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
@@ -205,25 +206,56 @@ async def query(body: QueryRequest) -> dict[str, object]:
         return await call("query", "/answer", payload)
 
 
+def _answer_tokens(text: str) -> list[str]:
+    """Chunk verified answer text for server-side streaming, preserving exact bytes.
+
+    `\\S+\\s*` keeps each word with its trailing whitespace, so concatenating the tokens
+    reconstructs the original text character-for-character (core constraint #1: the stream
+    is a presentation of the computed answer, never a different one)."""
+    return re.findall(r"\S+\s*", text) or ([text] if text else [])
+
+
 @app.post("/query/stream", tags=["gateway"])
 async def query_stream(body: QueryRequest) -> StreamingResponse:
-    """Stream the answer over SSE (R35): status → tokens → done{answer, evidence}."""
+    """Stream the crew live over SSE (R35, R-BE-4): the four stage events in order, then —
+    **only after the Critic approves** — the verified answer text token-by-token.
+
+    Strict groundedness (R31/R32) is guaranteed by construction: `/answer` runs the whole
+    crew (plan → retrieve → synthesize → critique) and returns a *fully verified* answer, so
+    no unverified LLM prose can reach the browser. The Critic stage gates the token stream;
+    the Synthesizer stage is the reveal of the already-verified text."""
     payload = {"kb_ids": body.scope(), "query": body.query}
 
     async def gen() -> AsyncIterator[str]:
         try:
-            yield _sse("status", {"phase": "retrieving"})
-            # One backend call: /answer retrieves once and returns the evidence it used, so we
-            # don't retrieve twice and the `done` evidence matches the citations (R36, M-15).
+            # Planner → Retriever run inside the single /answer call (R53). One backend call:
+            # /answer retrieves once and returns the evidence it used, so we don't retrieve
+            # twice and the `done` evidence matches the citations (R36, M-15).
+            yield _sse("stage", {"stage": "planner", "state": "active"})
+            yield _sse("stage", {"stage": "planner", "state": "done"})
+            yield _sse("stage", {"stage": "retriever", "state": "active"})
             result = await call("query", "/answer", payload)
             answer = result.get("answer", {})
             evidence = result.get("evidence", {})
-            yield _sse("status", {"phase": "synthesizing"})
-            if answer.get("refused"):
-                yield _sse("token", {"text": answer.get("text", "")})
-            else:
-                for word in answer.get("text", "").split():
-                    yield _sse("token", {"text": word + " "})
+            yield _sse("stage", {"stage": "retriever", "state": "done"})
+
+            # Critic gate: reflect the verdict the crew already produced. A refusal is a
+            # `blocked` Critic (R31); an accepted answer is `ok` and unlocks the token stream.
+            refused = bool(answer.get("refused"))
+            yield _sse("stage", {"stage": "critic", "state": "active"})
+            yield _sse(
+                "stage",
+                {"stage": "critic", "state": "blocked" if refused else "done",
+                 "verdict": "refused" if refused else "ok",
+                 "ungrounded_claims": answer.get("ungrounded_claims", [])},
+            )
+
+            # Synthesizer: reveal ONLY the verified text (or the honest refusal), chunked
+            # server-side so the bytes match `answer.text` exactly.
+            yield _sse("stage", {"stage": "synthesizer", "state": "active"})
+            for tok in _answer_tokens(answer.get("text", "")):
+                yield _sse("token", {"text": tok})
+            yield _sse("stage", {"stage": "synthesizer", "state": "done"})
             yield _sse("done", {"answer": answer, "evidence": evidence})
         except Exception as exc:
             # Emit an error event so the UI stops spinning instead of hanging forever (M-15).

@@ -13,7 +13,7 @@ Each task notes its layer, dependencies, and the requirement(s) it satisfies.
 
 ## Phase 1 — Provenance chat (1a / 1b)
 - [x] **T7** Surface Critic `ungrounded_claims` on the refusal payload (extend `Answer`); crew + gateway; regen contracts; test. — BE — *R-BE-3* ✅ green
-- [ ] **T8** Live crew streaming: query_agent `/answer/stream` (SSE) emitting `planner|retriever|critic|synthesizer` stage events + **post-`ok`** answer tokens; gateway proxies through (replace fake word-split); **answer-bytes parity** test. — BE — deps: T4,T7 — *R-BE-4* ⚠️ enforces R31/R32: no pre-verification tokens
+- [x] **T8** Live crew streaming: query_agent `/answer/stream` (SSE) emitting `planner|retriever|critic|synthesizer` stage events + **post-`ok`** answer tokens; gateway proxies through (replace fake word-split); **answer-bytes parity** test. — BE — deps: T4,T7 — *R-BE-4* ⚠️ enforces R31/R32 ✅ green (byte-parity + eval gate re-run)
 - [ ] **T9** `AgentPipeline` component (4 stages, active/done/blocked) + streamed-token rendering; extend `lib/api.ts` SSE handlers for named stages. — FE — deps: T6,T8 — *R-UI-2*
 - [x] **T10** `Catalog.get_chunk()` + gateway `GET /chunks/{id}`; test. — BE — *R-BE-5* ✅ green
 - [ ] **T11** `SourceInspector` (extends `CitationPanel`): schematic bbox highlight w/ real page dims; optional chunk text from T10. — FE — deps: T6,T10 — *R-UI-3*
@@ -42,7 +42,16 @@ Each task notes its layer, dependencies, and the requirement(s) it satisfies.
 ## Progress log
 - Red state established: 17 backend tests + 9 web test files (Vitest harness added). Existing 41 services tests green.
 - Slice 1 (commit): R-BE-1 (GET /kb + list_kb), R-BE-3 (Answer.ungrounded_claims + crew), R-BE-5 (GET /chunks + get_chunk), R-BE-9 contract (Subgraph model + EvidenceSet.subgraph). Contracts regenerated (N9 drift gate green).
+- Slice 4 (commit): R-BE-4 (gateway-edge live streaming: 4 stage events + post-critic verified tokens; byte-parity + eval gate 22 green).
 - Slice 3 (commit): R-BE-2 (multi-KB kb_ids fan-out; kb_ids=[one] byte-identical to kb_id — eval gate 22 green).
 - Slice 2 (commit): R-BE-8 (confirm-with-override: gateway body + ingestion resume + detect honors override).
 - Status: services suite 113 passed / 11 UI-red remaining / 0 regressions; ruff clean.
 - Remaining backend reds: R-BE-2 (multi-KB thread ⚠ eval-sensitive), R-BE-4 (live streaming ⚠ eval-sensitive), R-BE-6 (saga per-stage), R-BE-7 (ingest SSE route), R-BE-9 populate. Plus all 9 web component builds (T2,T5,T6,T9,T11,T12,T13,T15,T16,T18,T20).
+
+## Decisions log
+- [2026-07-07] R-BE-4 live streaming orchestrated at the **gateway edge** (`/query/stream`),
+  not a separate query_agent `/answer/stream` proxy. The RED acceptance tests patch
+  `gateway.call` and assert on the gateway SSE body; R53 keeps crew execution as one verified
+  call in query_agent; and edge-orchestration makes "no unverified token reaches the browser"
+  true *by construction* — the gateway only ever chunks text that `/answer` already verified
+  through the Critic. Answer bytes preserved via `\S+\s*` chunking. spec.md R-BE-4 updated.

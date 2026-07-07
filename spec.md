@@ -115,9 +115,16 @@ Each requirement has a binary acceptance criterion and a verification method
   retrieves from all selected KBs.
 - `[ ]` **R-BE-3 · Critic verdict surfaced** — the refusal payload carries the
   ungrounded claim(s) (extend `Answer` with an optional `ungrounded_claims`/`verdict`).
-- `[ ]` **R-BE-4 · Live crew streaming** — query_agent `/answer/stream` (SSE) emits
-  per-stage events + post-verification answer tokens; gateway `/query/stream` proxies
-  them through, replacing the fake word-split. Answer bytes unchanged.
+- `[x]` **R-BE-4 · Live crew streaming** — gateway `/query/stream` (the browser-facing SSE
+  edge) emits the four crew stage events in order (`planner|retriever|critic|synthesizer`)
+  around a single fully-verified `/answer` call, then streams the verified answer text
+  token-by-token **only after** the `critic` stage. Chunking preserves exact bytes
+  (`\S+\s*`), so the stream reconstructs `answer.text` character-for-character.
+  *Decision (2026-07-07):* orchestrated at the gateway edge rather than a separate
+  query_agent `/answer/stream` proxy — the acceptance tests assert on the gateway SSE body,
+  R53 keeps crew execution as one verified call in query_agent, and this makes "no unverified
+  token reaches the browser" true *by construction* (the edge can only stream text `/answer`
+  already verified). See todo.md decisions log.
 - `[ ]` **R-BE-5 · Chunk fetch** — `GET /chunks/{id}` returns `{id,text,page,bbox,...}`
   via `Catalog.get_chunk()` (feeds the inspector; schematic works without text but text
   enriches it).
