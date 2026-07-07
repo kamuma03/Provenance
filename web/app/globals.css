@@ -1,19 +1,28 @@
+/* Design system (R-UI-9). Palette from the redesign mockup: indigo accent, green "grounded",
+ * amber "caution/refusal". Typography targets IBM Plex (OFL — permissive, R59); drop the
+ * self-hosted .woff2 files into /public/fonts and add @font-face here to complete the bundle.
+ * Until then the stack degrades to the platform UI font, so nothing depends on a network fetch. */
 :root {
   --bg: #0f1117;
   --panel: #181b24;
+  --panel-2: #11141c;
   --border: #2a2f3a;
   --text: #e6e8ee;
   --muted: #9aa3b2;
-  --accent: #5b8cff;
-  --ok: #4caf50;
-  --warn: #f0a020;
+  --accent: #5e8bff;
+  --ok: #35c990;
+  --warn: #f0a83a;
+  --danger: #f0596a;
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
 }
 * { box-sizing: border-box; }
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-sans);
+  line-height: 1.5;
 }
 .nav {
   display: flex; align-items: center; gap: 1.5rem;
@@ -26,23 +35,85 @@ body {
 .main { max-width: 1100px; margin: 0 auto; padding: 1.5rem 1.25rem; }
 .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 1rem 1.25rem; }
 .row { display: flex; gap: 1rem; flex-wrap: wrap; }
-.col { flex: 1; min-width: 300px; }
+.col { flex: 1; min-width: 280px; }
 label { display: block; font-size: 0.85rem; color: var(--muted); margin: 0.5rem 0 0.25rem; }
 input, select, textarea, button {
-  font: inherit; color: var(--text); background: #11141c;
+  font: inherit; color: var(--text); background: var(--panel-2);
   border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.7rem; width: 100%;
 }
 button {
-  background: var(--accent); color: white; border: none; cursor: pointer; width: auto; padding: 0.55rem 1rem;
+  background: var(--accent); color: #fff; border: none; cursor: pointer; width: auto; padding: 0.55rem 1rem;
 }
+button.secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .pill { display: inline-block; padding: 0.15rem 0.55rem; border-radius: 999px; font-size: 0.75rem; border: 1px solid var(--border); }
 .muted { color: var(--muted); }
-.claim { border-left: 3px solid var(--accent); padding: 0.5rem 0.75rem; margin: 0.5rem 0; background: #11141c; border-radius: 0 8px 8px 0; }
+h1 { font-size: 1.6rem; } h2 { font-size: 1.1rem; }
+
+/* ---- Landing (R-UI-9) ---- */
+.hero { padding: 2.5rem 0 1.5rem; }
+.hero-title { font-size: 2.4rem; line-height: 1.1; margin: 0 0 0.75rem; letter-spacing: -0.02em; }
+.hero-sub { color: var(--muted); max-width: 60ch; font-size: 1.05rem; }
+.hero-cta { display: flex; gap: 0.75rem; margin-top: 1.25rem; flex-wrap: wrap; }
+.btn { display: inline-block; padding: 0.6rem 1.1rem; border-radius: 8px; text-decoration: none; font-weight: 600; }
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
+.features { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; margin-top: 1.5rem; }
+.feature h3 { margin: 0 0 0.4rem; }
+
+/* ---- Citations / source inspector (R-UI-3) ---- */
+.claim { border-left: 3px solid var(--accent); padding: 0.5rem 0.75rem; margin: 0.5rem 0; background: var(--panel-2); border-radius: 0 8px 8px 0; }
 .cite { font-size: 0.78rem; color: var(--accent); cursor: pointer; }
-.refusal { border-left: 3px solid var(--warn); color: var(--warn); }
-.msg-user { text-align: right; color: var(--muted); }
-.msg-assistant { margin: 0.5rem 0; }
 .bbox-view { position: relative; width: 100%; height: 180px; background: #0b0d12; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-.bbox-hl { position: absolute; border: 2px solid var(--accent); background: rgba(91,140,255,0.18); }
-h1 { font-size: 1.5rem; } h2 { font-size: 1.1rem; }
+.bbox-hl { position: absolute; border: 2px solid var(--accent); background: rgba(94, 139, 255, 0.18); }
+
+/* ---- Chat thread (R-UI-7) ---- */
+.msg-user { color: var(--text); font-weight: 600; }
+.msg-user::before { content: "❯ "; color: var(--accent); }
+.msg-assistant { margin: 0.6rem 0; white-space: pre-wrap; }
+
+/* ---- KB selector (R-UI-1) ---- */
+.kb-selector { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.25rem; }
+.kb-chip { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  width: auto; background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px;
+  padding: 0.4rem 0.7rem; cursor: pointer; color: var(--text); }
+.kb-chip.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.kb-chip .kb-name { font-weight: 600; font-size: 0.9rem; }
+.kb-chip .kb-domain { font-size: 0.72rem; }
+
+/* ---- Agent pipeline (R-UI-2) & saga stepper (R-UI-5) ---- */
+.pipeline, .stepper { list-style: none; display: flex; flex-wrap: wrap; gap: 0.5rem; padding: 0; margin: 0.75rem 0; }
+.pipeline-stage, .step { display: flex; align-items: center; gap: 0.4rem; padding: 0.35rem 0.7rem;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--panel-2); font-size: 0.82rem; }
+.stage-icon, .step-icon { font-size: 0.8rem; }
+.stage-state { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.stage-detail, .step-detail { font-size: 0.72rem; color: var(--muted); }
+.state-active { border-color: var(--accent); color: var(--text); }
+.state-active .stage-icon, .state-active .step-icon { color: var(--accent); }
+.state-done .stage-icon, .state-done .step-icon { color: var(--ok); }
+.state-blocked, .state-failed { border-color: var(--warn); }
+.state-blocked .stage-icon, .state-failed .stage-icon,
+.state-blocked .step-icon, .state-failed .step-icon { color: var(--warn); }
+.state-pending { opacity: 0.7; }
+
+/* ---- Refusal card (R-UI-4) ---- */
+.refusal { border-left: 3px solid var(--warn); color: var(--warn); }
+.refusal-card { border: 1px solid var(--warn); border-radius: 10px; padding: 0.9rem 1rem; margin: 0.6rem 0;
+  background: rgba(240, 168, 58, 0.06); }
+.refusal-badge { display: inline-block; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--warn); border: 1px solid var(--warn); border-radius: 999px; padding: 0.1rem 0.5rem; }
+.refusal-headline { font-weight: 600; margin: 0.5rem 0; }
+.ungrounded-claim { font-family: var(--font-mono); font-size: 0.85rem; }
+.chips, .refusal-suggestions .chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.suggestion-chip { border: 1px solid var(--border); border-radius: 999px; padding: 0.2rem 0.6rem; font-size: 0.8rem; }
+
+/* ---- Domain confirm (R-UI-6) ---- */
+.domain-confirm { border: 1px solid var(--border); border-radius: 10px; padding: 0.9rem 1rem; background: var(--panel-2); }
+
+.source-inspector h2 { margin-top: 0; }
+
+@media (max-width: 640px) {
+  .hero-title { font-size: 1.9rem; }
+  .main { padding: 1rem; }
+}

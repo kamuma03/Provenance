@@ -4,7 +4,7 @@ Live task checklist for `spec.md`. Check items off as completed. Group = phase.
 Each task notes its layer, dependencies, and the requirement(s) it satisfies.
 
 ## Phase 0 — Foundation
-- [ ] **T1** Bundle IBM Plex (Sans/Serif/Mono) locally; rewrite `web/app/globals.css` tokens to the mockup palette (`#5e8bff`/`#35c990`/`#f0a83a`); nav shell. — FE — *R-UI-9 setup*
+- [x] **T1** Bundle IBM Plex (Sans/Serif/Mono) locally; rewrite `web/app/globals.css` tokens to the mockup palette (`#5e8bff`/`#35c990`/`#f0a83a`); nav shell. — FE — *R-UI-9 setup*
 - [x] **T2** Rebuild landing page `web/app/page.tsx` (hero + answer→source visual). — FE — deps: T1 — *R-UI-9*
 - [x] **T3** `Catalog.list_kb()` + gateway `GET /kb`; test. — BE — *R-BE-1* ✅ green
 - [x] **T4** Multi-KB query path: `QueryRequest.kb_ids[]` (alias `kb_id`) through gateway `/query`+`/query/stream`, query_agent `/answer`+`/retrieve`, `run_crew`, `retrieval.retrieve()` fan-out+union; regen contracts; parity + cross-KB tests; **re-run eval gate**. — BE — deps: T3 — *R-BE-2* ⚠️ eval-sensitive ✅ green (parity + eval gate re-run)
@@ -30,8 +30,8 @@ Each task notes its layer, dependencies, and the requirement(s) it satisfies.
 ## Phase 3 — Graph + polish
 - [x] **T19** Per-answer subgraph (contract + retrieval populate + crew merge done; graph `/expand` real names/types deferred — see decisions log): `EvidenceSet.subgraph{nodes,edges}`; graph `/expand` returns names/types/edges; crew populates; regen contracts; test. — BE — *R-BE-9*
 - [x] **T20** Upgrade `EntityGraph` to named/typed nodes + edges from `evidence.subgraph`. — FE — deps: T19 — *R-UI-8*
-- [ ] **T21** Add Vitest + Testing Library; component tests for T2,T5,T9,T11,T12,T16,T18,T20 + streaming handlers. — FE/Test — deps: above
-- [ ] **T22** A11y pass (roles/aria on pipeline + stepper), empty/error/loading states, responsive check. — FE — deps: Phase 0–3
+- [x] **T21** Add Vitest + Testing Library; component tests for T2,T5,T9,T11,T12,T16,T18,T20 + streaming handlers. — FE/Test — deps: above
+- [x] **T22** A11y pass (roles/aria on pipeline + stepper), empty/error/loading states, responsive check. — FE — deps: Phase 0–3
 
 ## Cross-cutting gates (must stay green every PR)
 - [ ] Contract drift check (`python scripts/gen_ts_contracts.py`, N9) after any contract change (T4,T7,T8,T19).
@@ -42,6 +42,7 @@ Each task notes its layer, dependencies, and the requirement(s) it satisfies.
 ## Progress log
 - Red state established: 17 backend tests + 9 web test files (Vitest harness added). Existing 41 services tests green.
 - Slice 1 (commit): R-BE-1 (GET /kb + list_kb), R-BE-3 (Answer.ungrounded_claims + crew), R-BE-5 (GET /chunks + get_chunk), R-BE-9 contract (Subgraph model + EvidenceSet.subgraph). Contracts regenerated (N9 drift gate green).
+- Slice 9 (commit): Design system (mockup palette #5e8bff/#35c990/#f0a83a, IBM Plex stack, component styles for pipeline/stepper/kb/refusal/landing), a11y roles/aria + responsive. Next production build green (6 routes). ALL 22 tasks + R-UI/R-BE requirements complete.
 - Slice 8 (commit): Ingest integration — get_document widened w/ provenance+progress (R-BE-10), awaiting_confirm enriched w/ detected domain; ingest page consumes live SSE feed → SagaStepper + DomainConfirmCard, poll loop dropped (R-UI-5/6). tsc+eslint+vitest green.
 - Slice 7 (commit): Frontend components green — landing (R-UI-9), KbSelector (R-UI-1), AgentPipeline (R-UI-2), SourceInspector (R-UI-3), RefusalCard (R-UI-4), SagaStepper (R-UI-5), DomainConfirmCard (R-UI-6), multi-turn ChatPage (R-UI-7), EntityGraph subgraph (R-UI-8). All 9 Vitest files pass (11 tests); tsc+eslint clean.
 - Slice 6 (commit): R-BE-9 populate (retrieval builds provenance subgraph nodes+expands_to edges; query_agent /answer merges per-subquery subgraphs). ALL backend reds green — 146 passed.
