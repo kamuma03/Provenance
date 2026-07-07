@@ -1,9 +1,9 @@
 # Feature Plan: Provenance UI Redesign
 
-**Date**: 2026-07-06
+**Date**: 2026-07-06 · **Updated**: 2026-07-07 (endpoint/gap findings confirmed against the built surface)
 **Project**: Provenance (provenance-aware RAG + KG)
-**Status**: Planning — decisions locked (see §0)
-**Source spec**: `Provenance UI Redesign.html` (design mockup — screens 1a–1d)
+**Status**: **Implemented & verified** — decisions locked (§0); backend endpoint/gap findings confirmed (§10)
+**Source spec**: `Provenance UI Redesign.html` (design mockup — screens 1a–1d) · **Living spec**: `spec.md` · **Tasks**: `todo.md`
 
 ## 0. Locked Decisions & Deltas
 
@@ -238,12 +238,76 @@ pipeline now, (4) multi-KB `kb_ids[]`, (5) per-answer subgraph.
 1. **Eval gate under multi-KB** — the golden set is single-KB. Confirm the gate is
    re-run with `kb_ids=[one]` as the parity baseline, and decide whether any
    multi-KB golden cases are added. Retrieval fan-out must not change single-KB scores.
+   → **Resolved (§10):** single-KB fast-path makes `kb_ids=[x]` provably byte-identical;
+   eval gate re-run green (22 passed) after both eval-sensitive slices.
 2. **Synthesizer token streaming feasibility** — real token streaming (Task 19)
    requires the Synthesizer/Model to stream from the LLM; `synthesize()` currently
    returns a complete `Answer`. If the model path can't stream tokens, fall back to
    server-side chunking of the *final* text (still real stage events) — confirm which.
+   → **Resolved (§10):** server-side chunking of the verified answer (`\s*\S+\s*`,
+   byte-exact) is the *correct* design under R31/R32 — never stream pre-verification tokens.
 3. **`kb_id` alias lifetime** — how long do we dual-accept legacy `kb_id` before
-   removing it? (Pre-1.0 internal app → likely one release.)
+   removing it? (Pre-1.0 internal app → likely one release.) → **Decided:** dual-accept this
+   release; `QueryRequest.scope()` normalizes `kb_id → kb_ids=[kb_id]`; remove next release.
 4. **Cross-KB provenance/domain mismatch** — if selected KBs have different pinned
    domains (R2), does the Planner/Synthesizer handle mixed schemas, or do we
-   constrain multi-select to same-domain KBs for v1?
+   constrain multi-select to same-domain KBs for v1? → **Decided:** allow cross-domain
+   multi-select; query-time retrieval is namespace-based (vector `namespace=kb`, graph
+   link/expand per-KB, then union). No cross-KB entity resolution in v1 (follow-on).
+
+---
+
+## 10. Backend Endpoint & Gap Findings — Confirmed (build outcome)
+
+The §3.4 gaps were surveyed against the live tree and then closed during the build. This
+section records the **confirmed** endpoint surface (before → after) and how each gap was
+resolved — including two places where the shipped design deviated from the plan.
+
+### 10.1 Gateway endpoint inventory (before → after)
+
+| Method · Route | Before | After | Requirement |
+|---|---|---|---|
+| `POST /kb` | ✓ create | ✓ (unchanged) | — |
+| `GET /kb` | ✗ | **NEW** — list `[{id,name,domain_id,created_at}]` via `Catalog.list_kb()` | R-BE-1 |
+| `GET /chunks/{id}` | ✗ | **NEW** — `{id,text,page,bbox,…}` via `Catalog.get_chunk()`; degrades to 404 when the optional chunk table is absent | R-BE-5 |
+| `POST /kb/{kb_id}/documents` | ✓ upload | ✓ (unchanged) | — |
+| `GET /documents/{id}` | id,kb_id,source,status | **WIDENED** — + detected_domain, detection_confidence, schema_version, parse_method, ocr_engine, trace_id, parsed `progress` map | R-BE-10 |
+| `GET /documents/{id}/events` | ✗ | **NEW** — SSE feed; fans out the single `_on_status` NATS subscription to in-process listeners; snapshot then live events; closes on terminal/unknown/disconnect | R-BE-7 |
+| `POST /documents/{id}/confirm` | resume only | **EXTENDED** — optional `domain_id` override (the "Change" action); resume + detect honor it | R-BE-8 |
+| `GET /kb/{id}/stats` | ✓ | ✓ (unchanged) | — |
+| `POST /query` | `kb_id` | **CHANGED** — `kb_ids[]` (legacy `kb_id` aliased via `scope()`) | R-BE-2 |
+| `POST /query/stream` | fake word-split of the final answer | **REWORKED** — 4 crew stage events in order, then verified tokens **only after** the `critic` stage; byte-exact chunking | R-BE-2, R-BE-4 |
+| `query_agent POST /retrieve` · `/answer` | `kb_id` | **CHANGED** — `kb_ids` scope; per-subquery fan-out + union; merges per-subquery subgraphs | R-BE-2, R-BE-9 |
+
+### 10.2 Contract (shared Pydantic → `contracts.gen.ts`, N9) — all additive
+
+- `Answer.ungrounded_claims: list[str]` (+ on `Verdict`) — surfaces the Critic's rejected claim(s) on refusal (R-BE-3).
+- `Subgraph{nodes:[{id,name,type}], edges:[{src,dst,type}]}` + `EvidenceSet.subgraph` (default-factory) — per-answer graph inline (R-BE-9).
+- `QueryRequest.kb_ids: list[str]` with legacy `kb_id` alias (R-BE-2).
+- Regenerated in the same commits; N9 drift check green throughout.
+
+### 10.3 Data — one additive schema change
+
+- `document.progress JSONB DEFAULT '{}'` (+ idempotent `ADD COLUMN IF NOT EXISTS` for upgrades). Keeps the coarse `document.status` string untouched — the two are separate signals, as the plan's §3.5 required. No breaking migration; old rows read as `{}`.
+
+### 10.4 Gap resolutions vs. the §3.4 plan
+
+| §3.4 gap | Planned | Shipped | Note |
+|---|---|---|---|
+| 1 · no `GET /kb` | add list | `Catalog.list_kb()` + `GET /kb` | as planned |
+| 2 · no chunk fetch | add `get_chunk` + route | `Catalog.get_chunk()` + `GET /chunks/{id}` | **no chunk table exists** (chunk text lives in the Vector store) → route degrades to 404; the inspector renders schematically from citation page+bbox, text is best-effort enrichment |
+| 3 · verdict internal | surface ungrounded claims | `Answer.ungrounded_claims`, populated by the crew on refusal | as planned |
+| 4 · coarse saga status | additive field **or** `GET …/progress` | additive `progress` map + `STAGES` vocab + Saga `on_step` hook + **live SSE feed** (`/documents/{id}/events`) | went the SSE-feed route (Approach C), not a poll endpoint; drops the FE 40× poll loop |
+| 5 · confirm one-way | accept `domain_id` | `POST …/confirm` override, threaded through resume + detect | as planned |
+| 6 · graph ids-only | add `GET /kb/{id}/graph` | **DEVIATION** — no new endpoint; per-answer `EvidenceSet.subgraph` built inline in `retrieval.retrieve()` and merged in `/answer` (decision D5) | fewer round-trips; names/types are **id-fallback** pending Graph `/link`+`/expand` enrichment (follow-on) |
+| 7 · doc provenance hidden | widen `GET /documents/{id}` | widened as planned (+ `progress`) | as planned |
+| 8 · live crew streaming | query_agent `/answer/stream`, gateway proxies | **DEVIATION** — orchestrated at the **gateway edge** around the single verified `/answer` call; no new query_agent SSE route | makes "no unverified token reaches the browser" true *by construction* (R53 keeps the crew as one verified call); acceptance tests assert on the gateway body |
+
+### 10.5 Two design deviations worth the reviewer's attention
+
+1. **Live streaming lives at the gateway edge, not a query_agent proxy.** The gateway emits the four stage events around one fully-verified `/answer` call and chunks the verified text server-side. This is stronger for strict groundedness (R31/R32) than a mid-crew token proxy — the edge can only ever stream text the Critic already approved — and keeps crew execution in one service (R53). Trade-off: stage events reflect a completed pipeline rather than truly-concurrent per-agent progress; adequate for the UI and honest (no stage is shown that didn't run).
+2. **Entity graph is an inline per-answer subgraph, not a KB-graph endpoint.** Nodes/edges are derived from the retrieval graph-lift (linked → expanded, `expands_to`), with **entity ids used as fallback names and a generic type** because the retrieval-layer graph deps are id-based. Real canonical names + entity types + relation labels require enriching the Graph service `/link`+`/expand` responses — a cross-service contract change with eval-gate exposure, deliberately deferred (tracked in `todo.md` T19/T20).
+
+### 10.6 Verification (as-built)
+
+Backend + eval **146 passed** (stable 3×) · web **11 Vitest** (stable 3×) · N9 no drift · license-audit 4 passed · ruff + mypy (CI config) + eslint + tsc + `next build` all clean · **eval byte-parity gate green** after both eval-sensitive slices (multi-KB, live streaming). Two review passes (backend checkpoint + final) cleared; all findings fixed.
