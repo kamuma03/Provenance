@@ -10,7 +10,14 @@ from __future__ import annotations
 from typing import cast
 
 from fastapi import Request
-from provenance_contracts import EvidenceSet, QueryHit, ScoredChunk
+from provenance_contracts import (
+    EvidenceSet,
+    QueryHit,
+    ScoredChunk,
+    Subgraph,
+    SubgraphEdge,
+    SubgraphNode,
+)
 from provenance_service import create_app, tracer, validate_routes
 
 from .clients import call
@@ -108,6 +115,11 @@ async def answer(req: Request) -> dict[str, object]:
         chunks: list[ScoredChunk] = []
         entity_ids: list[str] = []
         graph_expanded = False
+        # Merge the per-subquery subgraphs so the UI EntityGraph sees one deduped graph (R37).
+        nodes: list[SubgraphNode] = []
+        edges: list[SubgraphEdge] = []
+        seen_nodes: set[str] = set()
+        seen_edges: set[tuple[str, str, str]] = set()
         for ev in collected:
             graph_expanded = graph_expanded or ev.graph_expanded
             for c in ev.chunks:
@@ -117,9 +129,19 @@ async def answer(req: Request) -> dict[str, object]:
             for e in ev.entity_ids:
                 if e not in entity_ids:
                     entity_ids.append(e)
+            for n in ev.subgraph.nodes:
+                if n.id not in seen_nodes:
+                    seen_nodes.add(n.id)
+                    nodes.append(n)
+            for edge in ev.subgraph.edges:
+                key = (edge.src, edge.dst, edge.type)
+                if key not in seen_edges:
+                    seen_edges.add(key)
+                    edges.append(edge)
         evidence = EvidenceSet(
             subquery=query, chunks=chunks,
             entity_ids=entity_ids, graph_expanded=graph_expanded,
+            subgraph=Subgraph(nodes=nodes, edges=edges),
         )
         span.set_attribute("answer.refused", ans.refused)
         span.set_attribute("answer.claims", len(ans.claims))

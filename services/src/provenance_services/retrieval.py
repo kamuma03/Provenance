@@ -13,7 +13,15 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from opentelemetry import trace
-from provenance_contracts import BBox, EvidenceSet, QueryHit, ScoredChunk
+from provenance_contracts import (
+    BBox,
+    EvidenceSet,
+    QueryHit,
+    ScoredChunk,
+    Subgraph,
+    SubgraphEdge,
+    SubgraphNode,
+)
 
 log = logging.getLogger("retrieval")
 
@@ -31,6 +39,33 @@ class RetrievalDeps:
     rerank: RerankFn
     link: LinkFn
     expand: ExpandFn
+
+
+def _build_subgraph(linked: list[str], expanded: list[str]) -> Subgraph:
+    """Assemble the per-answer subgraph the UI renders (R37/R-BE-9) from the graph lift.
+
+    Nodes are the linked (query-matched) and graph-expanded entities; edges record the real
+    provenance relation — each expanded entity was reached *by expanding from* the linked set.
+    Names fall back to the entity id here because the retrieval layer only receives ids; the
+    Graph service returning canonical names + entity types + relation labels is a tracked
+    follow-up (see todo.md T19/T20). The structure is stable either way."""
+    nodes: list[SubgraphNode] = []
+    seen: set[str] = set()
+    for eid in linked:
+        if eid not in seen:
+            seen.add(eid)
+            nodes.append(SubgraphNode(id=eid, name=eid, type="entity"))
+    for eid in expanded:
+        if eid not in seen:
+            seen.add(eid)
+            nodes.append(SubgraphNode(id=eid, name=eid, type="entity"))
+    edges = [
+        SubgraphEdge(src=src, dst=dst, type="expands_to")
+        for src in linked
+        for dst in expanded
+        if src != dst
+    ]
+    return Subgraph(nodes=nodes, edges=edges)
 
 
 def _to_chunk(h: QueryHit) -> ScoredChunk:
@@ -103,4 +138,5 @@ async def retrieve(
         chunks=[_to_chunk(h) for h in top],
         entity_ids=entity_ids,
         graph_expanded=bool(linked),
+        subgraph=_build_subgraph(linked, expanded),
     )
