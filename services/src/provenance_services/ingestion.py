@@ -34,6 +34,15 @@ STATUS_SUBJECT = "ingest.status"
 CONFIRM_SUBJECT = "ingest.confirm"
 INGEST_STREAM = "INGEST"
 
+# Canonical per-stage vocabulary the SagaStepper renders (R-BE-6 / R-UI-5). This is the
+# public stage contract; the internal saga step names ("write_graph", "upsert") map onto it,
+# so the chunk / graph / vector stages that emit no coarse status still advance the stepper.
+STAGES = ("parse", "chunk", "detect", "extract", "graph", "embed", "vector")
+_STEP_TO_STAGE = {
+    "parse": "parse", "chunk": "chunk", "detect": "detect", "extract": "extract",
+    "write_graph": "graph", "embed": "embed", "upsert": "vector",
+}
+
 # detect-but-confirm (R9/R55, review M-3): when a low-confidence domain detection would need
 # human confirmation, pause the saga instead of auto-proceeding. Off by default (auto-confirm)
 # so existing behavior is unchanged; set REQUIRE_DOMAIN_CONFIRM=1 to require confirmation.
@@ -204,7 +213,7 @@ async def _vector_step(c: Ctx) -> None:
         })
 
 
-def _build_saga() -> Saga:
+def _build_saga(on_step: object | None = None) -> Saga:
     return Saga([
         Step("parse", _parse_step),
         Step("chunk", _chunk_step),
@@ -213,7 +222,7 @@ def _build_saga() -> Saga:
         Step("write_graph", _graph_step, compensate=_compensate("graph")),
         Step("embed", _embed_step),
         Step("upsert", _vector_step, compensate=_compensate("vector")),
-    ])
+    ], on_step=on_step)  # type: ignore[arg-type]
 
 
 def _provenance(c: Ctx) -> dict[str, object]:
@@ -238,6 +247,13 @@ async def _publish_status(
     await bus.publish(STATUS_SUBJECT, json.dumps(evt).encode())
 
 
+async def _publish_stage(document_id: str, stage: str, state: str) -> None:
+    """Publish per-stage saga progress (R-BE-6). Distinct from `_publish_status`: the gateway
+    routes `stage`+`state` to the progress list and leaves the coarse `document.status` alone."""
+    evt = {"document_id": document_id, "status": stage, "stage": stage, "state": state}
+    await bus.publish(STATUS_SUBJECT, json.dumps(evt).encode())
+
+
 async def _run_saga(data: bytes, _headers: dict[str, str]) -> None:
     # Failure containment (review M-11): nothing here may escape the consumer callback, or a
     # malformed job / status-publish error would strand the document in a non-terminal state
@@ -257,7 +273,13 @@ async def _run_saga(data: bytes, _headers: dict[str, str]) -> None:
             ctx["trace_id"] = format(span.get_span_context().trace_id, "032x")
             span.set_attribute("document_id", doc_id)
             await _publish_status(doc_id, "parsing")
-            outcome = await _build_saga().run(ctx)
+
+            async def _emit_stage(step_name: str, state: str, _doc: str = doc_id) -> None:
+                # Map the internal step name to the public stage vocabulary so the silent
+                # chunk/graph/vector steps still advance the stepper (R-BE-6).
+                await _publish_stage(_doc, _STEP_TO_STAGE.get(step_name, step_name), state)
+
+            outcome = await _build_saga(on_step=_emit_stage).run(ctx)
             span.set_attribute("saga.status", outcome.status.value)
             if outcome.status is SagaStatus.FAILED:
                 await _publish_status(doc_id, "failed")

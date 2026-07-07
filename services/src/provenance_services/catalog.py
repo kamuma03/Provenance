@@ -162,13 +162,37 @@ class Catalog:
             return [dict(r) for r in rows]
 
     async def get_chunk(self, chunk_id: str) -> dict[str, object] | None:
-        """Fetch one chunk's text + page + bbox for the source inspector (R-BE-5)."""
+        """Fetch one chunk's text + page + bbox for the source inspector (R-BE-5).
+
+        Chunk text lives in the Vector store, not the catalog, so this table may be absent —
+        the inspector renders schematically from citation page+bbox without it. Degrade to
+        ``None`` (→ 404) rather than 500 when the table isn't provisioned (N6)."""
         await self._ensure()
         if self._pool is None:
             return None
+        try:
+            async with self._pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT id, document_id, kb_id, text, page, bbox FROM chunk WHERE id = $1",
+                    chunk_id,
+                )
+                return dict(row) if row else None
+        except Exception as exc:  # pragma: no cover - table optional; inspector works without it
+            log.info("get_chunk unavailable for %s: %s", chunk_id, exc)
+            return None
+
+    async def record_progress(self, doc_id: str, stage: str, state: str) -> None:
+        """Record per-stage saga progress for the ingestion stepper (R-BE-6).
+
+        Kept separate from `update_status`: this advances the `progress` map ({stage: state})
+        without touching the coarse `status` lifecycle string."""
+        await self._ensure()
+        if self._pool is None:
+            return
         async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT id, document_id, kb_id, text, page, bbox FROM chunk WHERE id = $1",
-                chunk_id,
+            await conn.execute(
+                "UPDATE document SET progress = "
+                "jsonb_set(COALESCE(progress, '{}'::jsonb), ARRAY[$2], to_jsonb($3::text)) "
+                "WHERE id = $1",
+                doc_id, stage, state,
             )
-            return dict(row) if row else None

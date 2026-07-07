@@ -20,8 +20,8 @@ Each task notes its layer, dependencies, and the requirement(s) it satisfies.
 - [ ] **T12** `RefusalCard` (verdict + ungrounded claim + suggested-query chips). — FE — deps: T7 — *R-UI-4*
 
 ## Phase 2 — Ingestion saga (1c)
-- [ ] **T13** Per-stage saga status: additive `progress[{stage,state,detail}]` on document; publish silent chunk/graph/vector stages; keep `document.status` string; test. — BE — *R-BE-6*
-- [ ] **T14** Live ingest feed: gateway `GET /documents/{id}/events` (SSE) forwarding NATS `ingest.status`; test. — BE — deps: T13 — *R-BE-7*
+- [x] **T13** Per-stage saga status: additive `progress[{stage,state,detail}]` on document; publish silent chunk/graph/vector stages; keep `document.status` string; test. — BE — *R-BE-6*
+- [x] **T14** Live ingest feed: gateway `GET /documents/{id}/events` (SSE) forwarding NATS `ingest.status`; test. — BE — deps: T13 — *R-BE-7* ✅ green
 - [ ] **T15** Widen `GET /documents/{id}` with provenance fields (detected_domain, confidence, parse_method, ocr_engine, trace_id). — BE — *R-BE-10*
 - [ ] **T16** `SagaStepper` + live counts; consume T14 SSE (drop 40× poll loop in `web/app/ingest/page.tsx`). — FE — deps: T13,T14,T15 — *R-UI-5*
 - [x] **T17** Confirm-with-override: extend `POST /documents/{id}/confirm` with optional `domain_id`/`schema_version`; saga resumes honoring + records it; test. — BE — *R-BE-8* ✅ green
@@ -42,6 +42,7 @@ Each task notes its layer, dependencies, and the requirement(s) it satisfies.
 ## Progress log
 - Red state established: 17 backend tests + 9 web test files (Vitest harness added). Existing 41 services tests green.
 - Slice 1 (commit): R-BE-1 (GET /kb + list_kb), R-BE-3 (Answer.ungrounded_claims + crew), R-BE-5 (GET /chunks + get_chunk), R-BE-9 contract (Subgraph model + EvidenceSet.subgraph). Contracts regenerated (N9 drift gate green).
+- Slice 5 (commit): R-BE-6 (STAGES vocab + saga on_step per-stage publish + catalog.record_progress + gateway routing) & R-BE-7 (in-process SSE fan-out at /documents/{id}/events; snapshot+terminal close).
 - Slice 4 (commit): R-BE-4 (gateway-edge live streaming: 4 stage events + post-critic verified tokens; byte-parity + eval gate 22 green).
 - Slice 3 (commit): R-BE-2 (multi-KB kb_ids fan-out; kb_ids=[one] byte-identical to kb_id — eval gate 22 green).
 - Slice 2 (commit): R-BE-8 (confirm-with-override: gateway body + ingestion resume + detect honors override).

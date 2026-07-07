@@ -18,6 +18,9 @@ log = logging.getLogger("saga")
 
 Ctx = dict[str, object]
 StepFn = Callable[[Ctx], Awaitable[None]]
+# (step_name, state) -> None; state ∈ {active, done, blocked, failed}. Lets the orchestrator
+# publish per-stage progress for the saga stepper (R-BE-6) without the steps knowing about it.
+StepHook = Callable[[str, str], Awaitable[None]]
 
 
 class SagaPause(Exception):  # noqa: N818 - control signal, not an error
@@ -46,15 +49,27 @@ class SagaOutcome(BaseModel):
 
 
 class Saga:
-    def __init__(self, steps: list[Step]) -> None:
+    def __init__(self, steps: list[Step], on_step: StepHook | None = None) -> None:
         self._steps = steps
+        self._on_step = on_step
+
+    async def _emit(self, name: str, state: str) -> None:
+        """Best-effort progress signal — a hook failure must never derail the saga (M-11)."""
+        if self._on_step is None:
+            return
+        try:
+            await self._on_step(name, state)
+        except Exception as exc:  # noqa: BLE001 - progress is advisory, not load-bearing
+            log.warning("saga on_step(%s, %s) failed: %s", name, state, exc)
 
     async def run(self, ctx: Ctx) -> SagaOutcome:
         completed: list[Step] = []
         for step in self._steps:
+            await self._emit(step.name, "active")
             try:
                 await step.run(ctx)
             except SagaPause:
+                await self._emit(step.name, "blocked")
                 return SagaOutcome(
                     status=SagaStatus.PAUSED,
                     completed=[s.name for s in completed],
@@ -62,6 +77,7 @@ class Saga:
                     failed_step=step.name,
                 )
             except Exception as exc:  # noqa: BLE001 - saga must catch all to compensate
+                await self._emit(step.name, "failed")
                 compensated: list[str] = []
                 for done in reversed(completed):
                     if done.compensate is not None:
@@ -80,6 +96,7 @@ class Saga:
                     error=str(exc),
                 )
             completed.append(step)
+            await self._emit(step.name, "done")
         return SagaOutcome(
             status=SagaStatus.DONE, completed=[s.name for s in completed], compensated=[]
         )

@@ -7,6 +7,7 @@ status transitions to the catalog (B.4). Returns 202 quickly on the async ingest
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import hashlib
@@ -62,10 +63,48 @@ CONFIRM_SUBJECT = "ingest.confirm"
 INGEST_STREAM = "INGEST"
 
 
+# In-process SSE fan-out (R-BE-7): the gateway already holds ONE durable subscription to the
+# status subject (`_on_status`). Rather than open a NATS subscription per browser, live
+# document feeds register an asyncio.Queue here and `_on_status` pushes each event to the
+# listeners for that document. Keyed by document_id; a set supports several viewers at once.
+_sse_listeners: dict[str, set[asyncio.Queue[dict[str, Any]]]] = {}
+
+
+def _register_listener(doc_id: str) -> asyncio.Queue[dict[str, Any]]:
+    q: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+    _sse_listeners.setdefault(doc_id, set()).add(q)
+    return q
+
+
+def _unregister_listener(doc_id: str, q: asyncio.Queue[dict[str, Any]]) -> None:
+    listeners = _sse_listeners.get(doc_id)
+    if listeners is not None:
+        listeners.discard(q)
+        if not listeners:
+            _sse_listeners.pop(doc_id, None)
+
+
+def _fan_out(doc_id: str, evt: dict[str, Any]) -> None:
+    for q in list(_sse_listeners.get(doc_id, ())):
+        q.put_nowait(evt)
+
+
 async def _on_status(data: bytes, _headers: dict[str, str]) -> None:
     evt = json.loads(data or b"{}")
-    doc_id, status = evt.get("document_id"), evt.get("status")
-    if not (doc_id and status):
+    doc_id = evt.get("document_id")
+    if not doc_id:
+        return
+    # Forward every event to any live document feed first, so the SSE stepper sees both the
+    # per-stage progress and the coarse lifecycle transitions (R-BE-7).
+    _fan_out(doc_id, evt)
+    # Per-stage saga progress (R-BE-6): record which stage is active and leave the coarse
+    # `document.status` lifecycle string untouched — the two are separate signals.
+    stage, state = evt.get("stage"), evt.get("state")
+    if stage and state:
+        await catalog.record_progress(doc_id, stage, state)
+        return
+    status = evt.get("status")
+    if not status:
         return
     provenance = evt.get("provenance")
     if provenance:  # terminal 'done' carries how the document was processed (R56, H-9)
@@ -173,6 +212,48 @@ async def upload_document(kb_id: str, req: Request) -> JSONResponse:
 async def get_document(doc_id: str) -> JSONResponse:
     doc = await catalog.get_document(doc_id)
     return JSONResponse(status_code=200 if doc else 404, content=doc or {"error": "not found"})
+
+
+_TERMINAL = ("done", "failed")
+
+
+@app.get("/documents/{doc_id}/events", tags=["gateway"])
+async def document_events(doc_id: str, request: Request) -> StreamingResponse:
+    """Live ingestion feed over SSE (R-BE-7): a current-status snapshot, then this document's
+    saga status + per-stage progress events as they arrive, so the SagaStepper advances in
+    real time instead of polling. The stream closes on the terminal `done`/`failed` state, on
+    an unknown document, or when the client disconnects."""
+    queue = _register_listener(doc_id)
+
+    async def gen() -> AsyncIterator[str]:
+        idle = 0
+        try:
+            yield _sse("open", {"document_id": doc_id})
+            # Snapshot: replay the current persisted state so a late subscriber isn't blank,
+            # and so an already-finished (or unknown) document ends the stream immediately.
+            doc = await catalog.get_document(doc_id)
+            if doc is None:
+                yield _sse("error", {"document_id": doc_id, "message": "unknown document"})
+                return
+            yield _sse("status", doc)
+            if str(doc.get("status")) in _TERMINAL:
+                return
+            while not await request.is_disconnected():
+                try:
+                    evt = await asyncio.wait_for(queue.get(), timeout=1.0)
+                except TimeoutError:
+                    idle += 1
+                    if idle % 15 == 0:  # keep the connection warm through proxies (~15s)
+                        yield ": keepalive\n\n"
+                    continue
+                idle = 0
+                yield _sse("status", evt)
+                if str(evt.get("status")) in _TERMINAL:
+                    break  # terminal state — close the stream
+        finally:
+            _unregister_listener(doc_id, queue)
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
 
 
 @app.post("/documents/{doc_id}/confirm", tags=["gateway"])
