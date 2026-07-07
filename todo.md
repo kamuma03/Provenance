@@ -34,10 +34,10 @@ Each task notes its layer, dependencies, and the requirement(s) it satisfies.
 - [x] **T22** A11y pass (roles/aria on pipeline + stepper), empty/error/loading states, responsive check. — FE — deps: Phase 0–3
 
 ## Cross-cutting gates (must stay green every PR)
-- [ ] Contract drift check (`python scripts/gen_ts_contracts.py`, N9) after any contract change (T4,T7,T8,T19).
-- [ ] Eval gate (`eval/tests/test_gate.py`) green — especially after T4/T8 (answer-bytes parity).
-- [ ] License-audit green (fonts OFL, optional react-force-graph MIT, dev Vitest MIT).
-- [ ] `ruff` + `mypy` (services) · `eslint` + `tsc` (web).
+- [x] Contract drift check (N9) — green (no drift after every contract change).
+- [x] Eval gate green — 22 passed after both eval-sensitive slices (T4 multi-KB parity, T8 stream byte-parity).
+- [x] License-audit green — 4 passed (Plex OFL, Vitest/Testing-Library MIT dev; no react-force-graph dep added — SVG kept dependency-free).
+- [x] `ruff` + `mypy` (services, CI config) · `eslint` + `tsc` + `next build` (web) — all clean.
 
 ## Progress log
 - Red state established: 17 backend tests + 9 web test files (Vitest harness added). Existing 41 services tests green.
