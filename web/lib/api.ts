@@ -32,12 +32,74 @@ export async function uploadDocument(
   return postJson(`/kb/${kbId}/documents`, { source, content_b64: contentB64, tier });
 }
 
-export async function getDocument(
-  docId: string,
-): Promise<{ id: string; kb_id: string; source: string; status: string }> {
+// Document view widened with provenance + per-stage progress (R-BE-10) for the stepper/panel.
+export interface DocumentView {
+  id: string;
+  kb_id: string;
+  source: string;
+  status: string;
+  detected_domain?: string | null;
+  detection_confidence?: number | null;
+  schema_version?: string | null;
+  parse_method?: string | null;
+  ocr_engine?: string | null;
+  trace_id?: string | null;
+  progress?: Record<string, string> | null;
+}
+
+export async function getDocument(docId: string): Promise<DocumentView> {
   const res = await fetch(`${BASE}/documents/${docId}`);
   if (!res.ok) throw new Error(`document ${docId} → ${res.status}`);
   return res.json();
+}
+
+export async function confirmDocument(docId: string, domainId?: string): Promise<void> {
+  await postJson(`/documents/${docId}/confirm`, domainId ? { domain_id: domainId } : {});
+}
+
+/** Consume the live ingest feed SSE (R-BE-7): each `status` event is a saga status / per-stage
+ *  progress payload. Resolves when the stream closes (terminal state or disconnect). */
+export interface DocEvent {
+  document_id?: string;
+  status?: string;
+  stage?: string;
+  state?: string;
+  detected_domain?: string | null;
+  detection_confidence?: number | null;
+  progress?: Record<string, string> | null;
+  message?: string;
+}
+export async function streamDocumentEvents(
+  docId: string,
+  handlers: { onStatus?: (evt: DocEvent) => void; onError?: (err: unknown) => void; signal?: AbortSignal },
+): Promise<void> {
+  try {
+    const res = await fetch(`${BASE}/documents/${docId}/events`, { signal: handlers.signal });
+    if (!res.ok) throw new Error(`events → ${res.status}`);
+    if (!res.body) throw new Error("no response body");
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let sep: number;
+      while ((sep = buffer.indexOf("\n\n")) >= 0) {
+        const raw = buffer.slice(0, sep);
+        buffer = buffer.slice(sep + 2);
+        let event = "message";
+        let data = "";
+        for (const line of raw.split("\n")) {
+          if (line.startsWith("event:")) event = line.slice(6).trim();
+          else if (line.startsWith("data:")) data += line.slice(5).trim();
+        }
+        if (event === "status" && data) handlers.onStatus?.(JSON.parse(data) as DocEvent);
+      }
+    }
+  } catch (err) {
+    handlers.onError?.(err);
+  }
 }
 
 export async function kbStats(kbId: string): Promise<{ entity_count: number }> {

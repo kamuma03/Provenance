@@ -290,7 +290,14 @@ async def _run_saga(data: bytes, _headers: dict[str, str]) -> None:
                 # /confirm can resume it, and report the status so the document isn't silently
                 # stuck (review M-3).
                 await _store_paused(doc_id, job)
-                await _publish_status(doc_id, "awaiting_confirm")
+                # Carry the low-confidence detection so the confirm card can show what to
+                # confirm/change (R-BE-8/R-BE-10) — it isn't persisted until the saga finishes.
+                pause_evt = {
+                    "document_id": doc_id, "status": "awaiting_confirm",
+                    "detected_domain": ctx.get("domain"),
+                    "detection_confidence": ctx.get("detection_confidence"),
+                }
+                await bus.publish(STATUS_SUBJECT, json.dumps(pause_evt).encode())
                 log.info("saga PAUSED at %s for %s (awaiting confirmation)",
                          outcome.failed_step, doc_id)
             elif outcome.status is SagaStatus.DONE:

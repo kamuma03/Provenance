@@ -22,10 +22,10 @@ Each task notes its layer, dependencies, and the requirement(s) it satisfies.
 ## Phase 2 — Ingestion saga (1c)
 - [x] **T13** Per-stage saga status: additive `progress[{stage,state,detail}]` on document; publish silent chunk/graph/vector stages; keep `document.status` string; test. — BE — *R-BE-6*
 - [x] **T14** Live ingest feed: gateway `GET /documents/{id}/events` (SSE) forwarding NATS `ingest.status`; test. — BE — deps: T13 — *R-BE-7* ✅ green
-- [ ] **T15** Widen `GET /documents/{id}` with provenance fields (detected_domain, confidence, parse_method, ocr_engine, trace_id). — BE — *R-BE-10*
-- [ ] **T16** `SagaStepper` + live counts; consume T14 SSE (drop 40× poll loop in `web/app/ingest/page.tsx`). — FE — deps: T13,T14,T15 — *R-UI-5*
+- [x] **T15** Widen `GET /documents/{id}` with provenance fields (detected_domain, confidence, parse_method, ocr_engine, trace_id). — BE — *R-BE-10*
+- [x] **T16** `SagaStepper` + live counts; consume T14 SSE (drop 40× poll loop in `web/app/ingest/page.tsx`). — FE — deps: T13,T14,T15 — *R-UI-5*
 - [x] **T17** Confirm-with-override: extend `POST /documents/{id}/confirm` with optional `domain_id`/`schema_version`; saga resumes honoring + records it; test. — BE — *R-BE-8* ✅ green
-- [ ] **T18** `DomainConfirmCard` (Confirm / Change). — FE — deps: T16,T17 — *R-UI-6*
+- [x] **T18** `DomainConfirmCard` (Confirm / Change). — FE — deps: T16,T17 — *R-UI-6*
 
 ## Phase 3 — Graph + polish
 - [x] **T19** Per-answer subgraph (contract + retrieval populate + crew merge done; graph `/expand` real names/types deferred — see decisions log): `EvidenceSet.subgraph{nodes,edges}`; graph `/expand` returns names/types/edges; crew populates; regen contracts; test. — BE — *R-BE-9*
@@ -42,6 +42,7 @@ Each task notes its layer, dependencies, and the requirement(s) it satisfies.
 ## Progress log
 - Red state established: 17 backend tests + 9 web test files (Vitest harness added). Existing 41 services tests green.
 - Slice 1 (commit): R-BE-1 (GET /kb + list_kb), R-BE-3 (Answer.ungrounded_claims + crew), R-BE-5 (GET /chunks + get_chunk), R-BE-9 contract (Subgraph model + EvidenceSet.subgraph). Contracts regenerated (N9 drift gate green).
+- Slice 8 (commit): Ingest integration — get_document widened w/ provenance+progress (R-BE-10), awaiting_confirm enriched w/ detected domain; ingest page consumes live SSE feed → SagaStepper + DomainConfirmCard, poll loop dropped (R-UI-5/6). tsc+eslint+vitest green.
 - Slice 7 (commit): Frontend components green — landing (R-UI-9), KbSelector (R-UI-1), AgentPipeline (R-UI-2), SourceInspector (R-UI-3), RefusalCard (R-UI-4), SagaStepper (R-UI-5), DomainConfirmCard (R-UI-6), multi-turn ChatPage (R-UI-7), EntityGraph subgraph (R-UI-8). All 9 Vitest files pass (11 tests); tsc+eslint clean.
 - Slice 6 (commit): R-BE-9 populate (retrieval builds provenance subgraph nodes+expands_to edges; query_agent /answer merges per-subquery subgraphs). ALL backend reds green — 146 passed.
 - Slice 5 (commit): R-BE-6 (STAGES vocab + saga on_step per-stage publish + catalog.record_progress + gateway routing) & R-BE-7 (in-process SSE fan-out at /documents/{id}/events; snapshot+terminal close).

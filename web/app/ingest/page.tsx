@@ -1,12 +1,23 @@
 "use client";
 
 import { useState } from "react";
-import { createKb, getDocument, uploadDocument } from "@/lib/api";
-import { DOMAINS, type ProcessingTier } from "@/lib/types";
+import DomainConfirmCard from "@/components/DomainConfirmCard";
+import SagaStepper from "@/components/SagaStepper";
+import {
+  confirmDocument,
+  createKb,
+  streamDocumentEvents,
+  uploadDocument,
+  type DocEvent,
+} from "@/lib/api";
+import { DOMAINS, type ProcessingTier, type StageState, type StageView } from "@/lib/types";
+
+// The public saga vocabulary the stepper renders (mirrors ingestion.STAGES, R-BE-6).
+const SAGA_STAGES = ["parse", "chunk", "detect", "extract", "graph", "embed", "vector"] as const;
+const freshStages = (): StageView[] => SAGA_STAGES.map((name) => ({ name, state: "pending" }));
 
 async function fileToBase64(file: File): Promise<string> {
-  // Encode in 32KB chunks rather than concatenating one character at a time, which is O(n²)
-  // and freezes the tab on large (tens-of-MB) files (review M-17).
+  // Encode in 32KB chunks rather than one char at a time (O(n²), freezes the tab on big files).
   const bytes = new Uint8Array(await file.arrayBuffer());
   const CHUNK = 0x8000;
   let binary = "";
@@ -22,8 +33,12 @@ export default function IngestPage() {
   const [kbId, setKbId] = useState<string>("");
   const [file, setFile] = useState<File | null>(null);
   const [tier, setTier] = useState<ProcessingTier>("full");
-  const [status, setStatus] = useState<string>("");
   const [busy, setBusy] = useState(false);
+
+  const [docId, setDocId] = useState<string>("");
+  const [status, setStatus] = useState<string>("");
+  const [stages, setStages] = useState<StageView[]>(freshStages());
+  const [confirm, setConfirm] = useState<{ detected: string; confidence: number } | null>(null);
 
   async function handleCreateKb() {
     const { id } = await createKb(kbName, domain);
@@ -31,24 +46,73 @@ export default function IngestPage() {
     if (typeof window !== "undefined") localStorage.setItem("kb", id);
   }
 
+  function onEvent(evt: DocEvent) {
+    // Per-stage progress advances a single step; lifecycle events set the coarse status and
+    // (on the snapshot) seed the whole stepper from the persisted progress map.
+    if (evt.stage && evt.state) {
+      setStages((prev) =>
+        prev.map((s) => (s.name === evt.stage ? { ...s, state: evt.state as StageState } : s)),
+      );
+      return;
+    }
+    if (evt.status) {
+      setStatus(evt.status);
+      if (evt.progress) {
+        setStages(
+          SAGA_STAGES.map((name) => ({
+            name,
+            state: (evt.progress?.[name] as StageState) ?? "pending",
+          })),
+        );
+      }
+      if (evt.status === "awaiting_confirm") {
+        setConfirm({
+          detected: evt.detected_domain ?? "generic",
+          confidence: evt.detection_confidence ?? 0,
+        });
+      } else if (evt.status === "done") {
+        setStages((prev) => prev.map((s) => ({ ...s, state: "done" })));
+      } else if (evt.status === "failed") {
+        setStages((prev) => {
+          const i = prev.findIndex((s) => s.state === "active");
+          return prev.map((s, j) => (j === i ? { ...s, state: "failed" } : s));
+        });
+      }
+    }
+  }
+
   async function handleUpload() {
     if (!file || !kbId) return;
     setBusy(true);
     setStatus("uploading…");
+    setStages(freshStages());
+    setConfirm(null);
     try {
       const b64 = await fileToBase64(file);
       const { document_id } = await uploadDocument(kbId, file.name, b64, tier);
-      for (let i = 0; i < 40; i++) {
-        const doc = await getDocument(document_id);
-        setStatus(`document ${document_id}: ${doc.status}`);
-        if (doc.status === "done" || doc.status === "failed") break;
-        await new Promise((r) => setTimeout(r, 1000));
-      }
+      setDocId(document_id);
+      // Live feed replaces the old 40× poll loop (R-BE-7 / R-UI-5).
+      await streamDocumentEvents(document_id, {
+        onStatus: onEvent,
+        onError: () => setStatus("connection to the ingest feed was lost"),
+      });
     } catch (e) {
       setStatus(`error: ${String(e)}`);
     } finally {
       setBusy(false);
     }
+  }
+
+  async function handleConfirm(override?: string) {
+    if (!docId) return;
+    setConfirm(null);
+    setStatus("confirming…");
+    await confirmDocument(docId, override);
+    // The saga resumes; a fresh feed carries the remaining stages to completion.
+    await streamDocumentEvents(docId, {
+      onStatus: onEvent,
+      onError: () => setStatus("connection to the ingest feed was lost"),
+    });
   }
 
   return (
@@ -101,8 +165,26 @@ export default function IngestPage() {
             {busy ? "Processing…" : "Upload & build"}
           </button>
         </div>
-        {status && <p className="muted" style={{ marginTop: "0.75rem" }}>{status}</p>}
       </div>
+
+      {docId && (
+        <div className="panel" style={{ marginTop: "1rem" }}>
+          <h2>3 · Ingestion</h2>
+          <p className="muted" style={{ fontSize: "0.8rem" }}>
+            {docId} · {status}
+          </p>
+          <SagaStepper stages={stages} />
+          {confirm && (
+            <div style={{ marginTop: "1rem" }}>
+              <DomainConfirmCard
+                detected={confirm.detected}
+                confidence={confirm.confidence}
+                onConfirm={handleConfirm}
+              />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

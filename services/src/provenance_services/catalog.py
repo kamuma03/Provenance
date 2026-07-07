@@ -8,6 +8,7 @@ unavailable (N6) so the skeleton flow still demonstrates the trace.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 from datetime import UTC, datetime
@@ -139,15 +140,31 @@ class Catalog:
                 provenance.get("trace_id"),
             )
 
-    async def get_document(self, doc_id: str) -> dict[str, str] | None:
+    async def get_document(self, doc_id: str) -> dict[str, object] | None:
+        """Document status + how it was processed (R-BE-10): the provenance fields (detected
+        domain, confidence, parse method, OCR engine, schema version, trace id) and the
+        per-stage `progress` map feed the ingestion stepper + provenance panel."""
         await self._ensure()
         if self._pool is None:
             return None
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT id, kb_id, source, status FROM document WHERE id = $1", doc_id
+                "SELECT id, kb_id, source, status, detected_domain, detection_confidence, "
+                "schema_version, parse_method, ocr_engine, trace_id, progress "
+                "FROM document WHERE id = $1",
+                doc_id,
             )
-            return dict(row) if row else None
+            if row is None:
+                return None
+            doc = dict(row)
+            # asyncpg returns jsonb as a str; hand the UI a parsed object.
+            progress = doc.get("progress")
+            if isinstance(progress, str):
+                import json as _json
+
+                with contextlib.suppress(Exception):
+                    doc["progress"] = _json.loads(progress)
+            return doc
 
     async def list_kb(self) -> list[dict[str, object]]:
         """List knowledge bases so the UI can offer a selector instead of a raw id (R-BE-1)."""
