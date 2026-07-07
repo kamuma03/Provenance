@@ -290,10 +290,11 @@ async def query(body: QueryRequest) -> dict[str, object]:
 def _answer_tokens(text: str) -> list[str]:
     """Chunk verified answer text for server-side streaming, preserving exact bytes.
 
-    `\\S+\\s*` keeps each word with its trailing whitespace, so concatenating the tokens
-    reconstructs the original text character-for-character (core constraint #1: the stream
-    is a presentation of the computed answer, never a different one)."""
-    return re.findall(r"\S+\s*", text) or ([text] if text else [])
+    `\\s*\\S+\\s*` keeps each word with its surrounding whitespace (including any leading
+    whitespace on the first token), so concatenating the tokens reconstructs the original text
+    character-for-character (core constraint #1: the stream is a presentation of the computed
+    answer, never a different one)."""
+    return re.findall(r"\s*\S+\s*", text) or ([text] if text else [])
 
 
 @app.post("/query/stream", tags=["gateway"])

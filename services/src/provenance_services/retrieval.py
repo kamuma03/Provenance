@@ -97,16 +97,21 @@ async def retrieve(
     span = trace.get_current_span()
     vector = await deps.embed(query)
 
-    # Vector floor fanned out across the selected KBs, unioned in scope order and deduped by
-    # chunk_id (globally unique) — for a single KB this is exactly the legacy hit list (parity).
+    # Vector floor fanned out across the selected KBs. For a SINGLE KB we pass the hybrid hits
+    # straight through — byte-identical to the legacy path even if hybrid ever returned a
+    # repeated id (parity is guaranteed, not merely likely; protects the eval gate). Across
+    # several KBs we union in scope order, deduped by the globally-unique chunk_id.
     hits: list[QueryHit] = []
     if vector:
-        seen_hits: set[str] = set()
-        for kb in scope:
-            for h in await deps.hybrid(kb, vector, query, k * 3):
-                if h.chunk_id not in seen_hits:
-                    seen_hits.add(h.chunk_id)
-                    hits.append(h)
+        if len(scope) == 1:
+            hits = list(await deps.hybrid(scope[0], vector, query, k * 3))
+        else:
+            seen_hits: set[str] = set()
+            for kb in scope:
+                for h in await deps.hybrid(kb, vector, query, k * 3):
+                    if h.chunk_id not in seen_hits:
+                        seen_hits.add(h.chunk_id)
+                        hits.append(h)
 
     # Rerank is a refinement, not the floor: a Model-service hiccup must not throw away good
     # hybrid hits — fall back to the hybrid fusion order (R25, review H-6).
@@ -121,11 +126,14 @@ async def retrieve(
     # Additive graph lift; empty-expansion ladder governs the entity side (R27). A Graph-
     # service outage degrades to vector-only evidence — never fails the whole query (R25/H-6).
     try:
-        linked = []
-        for kb in scope:
-            for e in await deps.link(kb, query):
-                if e not in linked:
-                    linked.append(e)
+        if len(scope) == 1:
+            linked = list(await deps.link(scope[0], query))  # legacy path, untouched (parity)
+        else:
+            linked = []
+            for kb in scope:
+                for e in await deps.link(kb, query):
+                    if e not in linked:
+                        linked.append(e)
         expanded = await deps.expand(linked) if linked else []
     except Exception as exc:
         log.warning("graph lift failed; vector floor stands: %s", exc)
