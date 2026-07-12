@@ -201,11 +201,28 @@ async def upload_document(kb_id: str, req: Request) -> JSONResponse:
                 return JSONResponse(
                     status_code=200, content={"document_id": doc_id, "status": "duplicate"}
                 )
-        job = json.dumps(
-            {"document_id": doc_id, "kb_id": kb_id, "content_b64": content_b64, "source": source}
-        ).encode()
+        # Out-of-band content (R5/R52): store the raw bytes in the catalog and enqueue a job
+        # that carries only the id. Ingestion fetches the content over the wire, so document
+        # size is no longer bounded by the NATS payload limit.
+        await catalog.store_content(doc_id, raw)
+        # Optional domain pin (R55/R-BE-8): a caller ingesting into a domain-scoped KB can pass
+        # domain_id to skip auto-detection and pin extraction to that schema.
+        job_body: dict[str, object] = {"document_id": doc_id, "kb_id": kb_id, "source": source}
+        if body.get("domain_id"):
+            job_body["domain_id"] = body["domain_id"]
+        job = json.dumps(job_body).encode()
         await bus.publish_durable(INGEST_SUBJECT, job)  # persisted job (H-3)
     return JSONResponse(status_code=202, content={"document_id": doc_id, "status": "queued"})
+
+
+@app.get("/documents/{doc_id}/content", tags=["gateway"])
+async def get_document_content(doc_id: str) -> JSONResponse:
+    """Serve a document's raw bytes (base64) so Ingestion can fetch content by id over the
+    wire (R52) instead of receiving it inline in the saga job."""
+    raw = await catalog.get_content(doc_id)
+    if raw is None:
+        return JSONResponse(status_code=404, content={"error": "no content for document"})
+    return JSONResponse(content={"content_b64": base64.b64encode(raw).decode()})
 
 
 @app.get("/documents/{doc_id}", tags=["gateway"])

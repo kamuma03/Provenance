@@ -110,6 +110,29 @@ class Catalog:
             )
             return (str(existing["id"]), False) if existing else (doc_id, True)
 
+    async def store_content(self, doc_id: str, content: bytes) -> None:
+        """Persist the raw uploaded bytes out-of-band (R5). Ingestion fetches these by id over
+        the wire, so the saga job no longer carries the base64 inline over NATS."""
+        await self._ensure()
+        if self._pool is None:
+            return
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO document_content (document_id, content) VALUES ($1, $2) "
+                "ON CONFLICT (document_id) DO NOTHING",
+                doc_id, content,
+            )
+
+    async def get_content(self, doc_id: str) -> bytes | None:
+        await self._ensure()
+        if self._pool is None:
+            return None
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT content FROM document_content WHERE document_id = $1", doc_id
+            )
+            return bytes(row["content"]) if row else None
+
     async def update_status(self, doc_id: str, status: str) -> None:
         await self._ensure()
         if self._pool is None:

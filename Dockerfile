@@ -32,6 +32,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 python3-pip \
+        # Shared libs for the OCR fallback (RapidOCR/OpenCV) and Docling rendering — without
+        # these, image-only pages crash the parse step with `libxcb.so.1: cannot open ...`.
+        libxcb1 libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:0.9.18 /uv /usr/local/bin/uv

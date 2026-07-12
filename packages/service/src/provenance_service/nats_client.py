@@ -14,6 +14,14 @@ from contextlib import suppress
 import nats
 from nats.aio.client import Client as NatsConn
 from nats.aio.msg import Msg
+from nats.js.api import ConsumerConfig
+
+# The ingest saga can run for minutes on a large document (a 100+ page 10-K fans out into
+# hundreds of per-chunk extraction calls). JetStream's default 30s ack_wait would redeliver
+# such a job mid-flight, duplicating work and clogging the queue, so we set a generous window
+# and bound redelivery for a genuinely poison message.
+_ACK_WAIT_SECONDS = 1800  # 30 min
+_MAX_DELIVER = 4
 from opentelemetry import context as otel_context
 from opentelemetry import trace
 from opentelemetry.propagate import extract, inject
@@ -143,5 +151,9 @@ class NatsBus:
                 await msg.ack()  # saga completed → safe to remove the job from the stream
 
         await self._js.subscribe(  # type: ignore[attr-defined]
-            subject, durable=durable, cb=_cb, manual_ack=True
+            subject,
+            durable=durable,
+            cb=_cb,
+            manual_ack=True,
+            config=ConsumerConfig(ack_wait=_ACK_WAIT_SECONDS, max_deliver=_MAX_DELIVER),
         )

@@ -36,6 +36,15 @@ CREATE TABLE IF NOT EXISTS document (
     UNIQUE (kb_id, content_hash)
 );
 
+-- Out-of-band document content (R5): the raw uploaded bytes live here, owned by the Gateway
+-- catalog, and Ingestion fetches them by id over the wire (R52) instead of the saga job
+-- carrying the base64 inline over NATS — which capped document size at the broker payload
+-- limit. Kept in its own table so the large BYTEA never bloats document-metadata scans.
+CREATE TABLE IF NOT EXISTS document_content (
+    document_id  TEXT PRIMARY KEY REFERENCES document(id) ON DELETE CASCADE,
+    content      BYTEA NOT NULL
+);
+
 -- Chunk geometry lives in the Vector store's per-record metadata (bbox) and the Graph,
 -- which own retrieval and provenance — a catalog `chunk` table would be write-only dead
 -- schema, so it is intentionally not modelled here (review H-9). Reinstate only if the

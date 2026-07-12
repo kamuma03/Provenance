@@ -9,6 +9,7 @@ Gateway via NATS for catalog updates (B.4).
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import logging
@@ -20,7 +21,7 @@ from provenance_contracts import Chunk, ParsedElement
 from provenance_service import NatsBus, ServiceSettings, create_app, tracer
 
 from .chunker import chunk_elements
-from .clients import call
+from .clients import call, call_get
 from .saga import Ctx, Saga, SagaPause, SagaStatus, Step
 
 logging.basicConfig(level=logging.INFO)
@@ -78,6 +79,9 @@ async def _pop_paused(doc_id: str) -> dict[str, object] | None:
 # (review H-1). One window per ~this-many characters bounds the number of extract calls.
 _DETECT_SAMPLE_CHARS = int(os.environ.get("DETECT_SAMPLE_CHARS", "2000"))
 _EXTRACT_WINDOW_CHARS = int(os.environ.get("EXTRACT_WINDOW_CHARS", "4000"))
+# Extraction windows run concurrently (bounded) so a many-window document isn't serialized
+# on extraction round-trips — the dominant cost for large docs (perf).
+_EXTRACT_CONCURRENCY = int(os.environ.get("EXTRACT_CONCURRENCY", "8"))
 
 
 def _windows(chunks: list[Chunk], size: int) -> Iterator[str]:
@@ -160,8 +164,17 @@ async def _extract_step(c: Ctx) -> None:
     relations: list[dict[str, object]] = []
     seen_e: set[tuple[object, ...]] = set()
     seen_r: set[tuple[object, ...]] = set()
-    for window in _windows(chunks, _EXTRACT_WINDOW_CHARS):
-        resp = await call("extraction", "/extract", {"text": window, "domain_id": c["domain"]})
+    # Extract windows concurrently (bounded): a large document fans out into many windows,
+    # and running them one-at-a-time serializes the whole saga on extraction round-trips. The
+    # merge below is order-independent (dedup by key), so concurrency is safe (perf, not H-1).
+    windows = list(_windows(chunks, _EXTRACT_WINDOW_CHARS))
+    sem = asyncio.Semaphore(_EXTRACT_CONCURRENCY)
+
+    async def _extract_one(text: str) -> dict[str, object]:
+        async with sem:
+            return await call("extraction", "/extract", {"text": text, "domain_id": c["domain"]})
+
+    for resp in await asyncio.gather(*(_extract_one(w) for w in windows)):
         c["schema_version"] = resp.get("schema_version")
         for e in resp.get("entities", []):
             ekey = (e.get("type"), e.get("canonical_name"))
@@ -263,12 +276,20 @@ async def _run_saga(data: bytes, _headers: dict[str, str]) -> None:
     try:
         job = json.loads(data or b"{}")
         doc_id = str(job.get("document_id", "?"))
+        # Out-of-band content (R5/R52): the job carries only the id; fetch the raw bytes from
+        # the gateway catalog over the wire. (A resumed/confirm job may still inline content.)
+        content_b64 = job.get("content_b64", "")
+        if not content_b64:
+            fetched = await call_get("gateway", f"/documents/{doc_id}/content")
+            content_b64 = str(fetched.get("content_b64", ""))
         ctx: Ctx = {
             "document_id": doc_id,
             "kb_id": job.get("kb_id", "?"),
-            "content_b64": job.get("content_b64", ""),
+            "content_b64": content_b64,
             "confirmed": job.get("confirmed", False),  # set true on a resumed job (R55)
         }
+        if job.get("domain_id"):
+            ctx["domain_id"] = job["domain_id"]  # pin extraction schema (skip auto-detect)
         with tracer("ingestion").start_as_current_span("ingestion.saga") as span:
             ctx["trace_id"] = format(span.get_span_context().trace_id, "032x")
             span.set_attribute("document_id", doc_id)

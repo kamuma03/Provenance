@@ -6,6 +6,9 @@ x-service-base: &service-base
   build:
     context: ..
     dockerfile: Dockerfile
+  # Reach the host's Ollama (already serving the tier models) from inside the containers.
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
   environment: &service-env
     NATS_URL: nats://nats:4222
     OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
@@ -45,7 +48,13 @@ services:
   # inject ingest events. Only the Gateway is meant to face the network.
   nats:
     image: nats:2.10
-    command: ["-js"]
+    # Config file (not CLI flags): raises max_payload to 64MB because the ingest saga job
+    # carries the document's base64 content inline (default cap 1MB). JetStream stays on for
+    # durable ingest jobs (H-3). Docs whose base64 exceeds 64MB (NATS's ceiling) can't be
+    # enqueued by this inline-content design.
+    command: ["-c", "/etc/nats/nats.conf"]
+    volumes:
+      - ./nats.conf:/etc/nats/nats.conf:ro
     ports: ["127.0.0.1:4222:4222"]
 
   postgres:
@@ -123,6 +132,11 @@ services:
     environment:
       <<: *service-env
       service_name: ingestion
+      # LLM extraction: keep windows small enough that each LLM call stays fast, and cap
+      # concurrency to what the local Ollama serves without queueing past the timeout. (For
+      # the heuristic path these can go much higher — 40000 / 8.)
+      EXTRACT_WINDOW_CHARS: "8000"
+      EXTRACT_CONCURRENCY: "3"
 
   parse:
     <<: *service-base

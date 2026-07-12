@@ -105,7 +105,10 @@ class OpenAICompatLLMClient:
         effort = os.environ.get("LLM_REASONING_EFFORT", "none").strip()
         if effort:
             payload["reasoning_effort"] = effort
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        # Local models can be slow on large prompts / when Ollama serializes concurrent
+        # requests; make the ceiling configurable so extraction windows don't ReadTimeout.
+        _timeout = float(os.environ.get("LLM_TIMEOUT_S", "300"))
+        async with httpx.AsyncClient(timeout=_timeout) as client:
             resp = await client.post(
                 f"{self.base_url}/chat/completions", json=payload, headers=headers
             )
