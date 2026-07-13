@@ -15,7 +15,7 @@ x-service-base: &service-base
     OTEL_SERVICE_NAMESPACE: provenance
     # Sandbox/compose: deterministic embedder + lexical reranker (no model downloads).
     # Unset on the DGX Spark to use the real fastembed models.
-    PROVENANCE_OFFLINE: "1"
+    PROVENANCE_OFFLINE: ${PROVENANCE_OFFLINE-1}
     # ---- ONNX model selection (R66/R24) ----
     # The embedder + reranker models, sourced from .env so it's the single source of truth.
     # Defaults match .env; overridden per env. Only used when PROVENANCE_OFFLINE is unset.

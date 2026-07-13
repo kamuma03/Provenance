@@ -1,0 +1,25 @@
+# Persistent vector store overlay — Qdrant only.
+#
+#   docker compose -f ops/docker-compose.yml -f ops/docker-compose.qdrant.yml up -d
+#
+# Swaps the Vector service's default in-memory FAISS (which silently loses every index on a
+# container restart, review H-3) for a disk-backed Qdrant, without pulling in the full online
+# overlay's model changes — so the deterministic embedder and the vLLM LLM path stay as-is.
+name: provenance
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+
+  vector:
+    environment:
+      VECTOR_BACKEND: qdrant
+      QDRANT_URL: http://qdrant:6333
+    depends_on:
+      - qdrant
+
+volumes:
+  qdrant_data:
