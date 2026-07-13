@@ -8,6 +8,7 @@ ingestion trace stays unbroken across the queue.
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 
@@ -22,6 +23,11 @@ from nats.js.api import ConsumerConfig
 # and bound redelivery for a genuinely poison message.
 _ACK_WAIT_SECONDS = 1800  # 30 min
 _MAX_DELIVER = 4
+# Bound how many saga jobs the consumer runs concurrently. Each saga fans out into many
+# parallel extraction calls and CPU-heavy OCR, so letting JetStream deliver its default
+# 1000 unacked at once floods the service — sagas hang, never ack, and redeliver in a loop.
+# Keep this small; downstream concurrency comes from EXTRACT_CONCURRENCY within each saga.
+_MAX_ACK_PENDING = int(os.environ.get("INGEST_MAX_ACK_PENDING", "4"))
 from opentelemetry import context as otel_context
 from opentelemetry import trace
 from opentelemetry.propagate import extract, inject
@@ -155,5 +161,9 @@ class NatsBus:
             durable=durable,
             cb=_cb,
             manual_ack=True,
-            config=ConsumerConfig(ack_wait=_ACK_WAIT_SECONDS, max_deliver=_MAX_DELIVER),
+            config=ConsumerConfig(
+                ack_wait=_ACK_WAIT_SECONDS,
+                max_deliver=_MAX_DELIVER,
+                max_ack_pending=_MAX_ACK_PENDING,
+            ),
         )
