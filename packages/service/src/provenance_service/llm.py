@@ -17,6 +17,7 @@ and route each task to a tier — swapping the underlying model is then a one-li
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from collections.abc import Callable
@@ -105,6 +106,16 @@ class OpenAICompatLLMClient:
         effort = os.environ.get("LLM_REASONING_EFFORT", "none").strip()
         if effort:
             payload["reasoning_effort"] = effort
+        # Provider-specific body params merged verbatim, e.g. vLLM's
+        # `{"chat_template_kwargs": {"enable_thinking": false}}` to switch a thinking model
+        # (Qwen3.5) into direct-answer mode. reasoning_effort is Ollama's control; vLLM 400s
+        # on it, so pair LLM_EXTRA_BODY with LLM_REASONING_EFFORT="" when serving via vLLM.
+        _extra = os.environ.get("LLM_EXTRA_BODY", "").strip()
+        if _extra:
+            try:
+                payload.update(json.loads(_extra))
+            except json.JSONDecodeError:
+                log.warning("LLM_EXTRA_BODY is not valid JSON; ignoring")
         # Local models can be slow on large prompts / when Ollama serializes concurrent
         # requests; make the ceiling configurable so extraction windows don't ReadTimeout.
         _timeout = float(os.environ.get("LLM_TIMEOUT_S", "300"))

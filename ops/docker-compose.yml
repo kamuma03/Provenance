@@ -28,6 +28,10 @@ x-service-base: &service-base
     LLM_LOCAL_BASE_URL: ${LLM_LOCAL_BASE_URL-http://ollama:11434/v1}  # empty ⇒ heuristic (no local server)
     LLM_TIER_HIGH: local:qwen3.6:27b      # capable model: synthesis + critique
     LLM_TIER_LOW: local:qwen3.5:9b        # fast model: detection, planning, bulk extraction
+    # vLLM serving: it 400s on Ollama's `reasoning_effort`, so disable that and switch the
+    # Qwen3.5 thinking model to direct-answer mode via chat_template_kwargs instead.
+    LLM_REASONING_EFFORT: ${LLM_REASONING_EFFORT-none}
+    LLM_EXTRA_BODY: ${LLM_EXTRA_BODY-}
     LLM_EXTRACTION: low
     LLM_DETECTION: low
     LLM_PLANNER: low
@@ -132,11 +136,14 @@ services:
     environment:
       <<: *service-env
       service_name: ingestion
-      # LLM extraction: keep windows small enough that each LLM call stays fast, and cap
-      # concurrency to what the local Ollama serves without queueing past the timeout. (For
-      # the heuristic path these can go much higher — 40000 / 8.)
+      # vLLM continuous batching scales with concurrency, so feed it many parallel window
+      # calls (Ollama was serial and capped at ~3). Combined with the driver's per-doc
+      # concurrency this saturates vLLM's batch (peak ~304 tok/s vs Ollama's flat 33).
       EXTRACT_WINDOW_CHARS: "8000"
-      EXTRACT_CONCURRENCY: "3"
+      EXTRACT_CONCURRENCY: "16"
+      # Large (170+ page) OCR-heavy 10-Ks take >180s to parse; raise the inter-service call
+      # ceiling so parse/extraction don't ReadTimeout on them.
+      SERVICE_CALL_TIMEOUT_S: "600"
 
   parse:
     <<: *service-base
