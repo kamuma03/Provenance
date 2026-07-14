@@ -144,6 +144,9 @@ services:
       # Large (170+ page) OCR-heavy 10-Ks take >180s to parse; raise the inter-service call
       # ceiling so parse/extraction don't ReadTimeout on them.
       SERVICE_CALL_TIMEOUT_S: "600"
+      # Concurrent in-flight sagas. Tune to keep vLLM's batch fed without overwhelming the
+      # service (each saga also runs CPU-heavy OCR). Overridable for throughput tuning.
+      INGEST_MAX_ACK_PENDING: ${INGEST_MAX_ACK_PENDING-4}
 
   parse:
     <<: *service-base
