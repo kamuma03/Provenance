@@ -55,7 +55,17 @@ def _req(method: str, url: str, payload: dict | None = None, timeout: int = 120)
             return e.code, {"error": body[:200]}
 
 
-def create_kb(gateway: str, name: str, domain_id: str) -> str:
+def create_kb(gateway: str, name: str, domain_id: str, *, resume: bool = False) -> str:
+    """Create a KB, or (resume) reuse an existing one with the same name+domain so a re-run
+    continues into it — the gateway dedups by content hash (N5), so already-ingested docs are
+    skipped and only new ones are processed."""
+    if resume:
+        status, kbs = _req("GET", f"{gateway}/kb")
+        if status == 200 and isinstance(kbs, list):
+            for kb in kbs:
+                if kb.get("name") == name and kb.get("domain_id") == domain_id:
+                    print(f"  resuming into existing KB {kb.get('id')} ({name})")
+                    return str(kb["id"])
     status, body = _req("POST", f"{gateway}/kb", {"name": name, "domain_id": domain_id})
     kb_id = body.get("id") or body.get("kb_id") or body.get("knowledge_base_id")
     if not kb_id:
@@ -112,6 +122,9 @@ def main() -> int:
                     help="seconds before a stuck in-flight doc is abandoned")
     ap.add_argument("--status-file", type=Path,
                     default=Path("corpora/ingest_status.json"))
+    ap.add_argument("--resume", action="store_true",
+                    help="reuse existing KBs (same name+domain) and let content-hash dedup "
+                         "skip already-ingested docs — continue a run instead of duplicating")
     args = ap.parse_args()
     root = Path.cwd()
 
@@ -124,7 +137,7 @@ def main() -> int:
             pdfs = pdfs[: args.limit]
         if not pdfs:
             continue
-        kb_id = create_kb(args.gateway, name, domain)
+        kb_id = create_kb(args.gateway, name, domain, resume=args.resume)
         kb_ids[name] = kb_id
         print(f"KB {name} ({domain}) = {kb_id}: {len(pdfs)} PDFs")
         work += [(kb_id, p, domain) for p in pdfs]

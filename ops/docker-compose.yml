@@ -59,7 +59,11 @@ services:
     command: ["-c", "/etc/nats/nats.conf"]
     volumes:
       - ./nats.conf:/etc/nats/nats.conf:ro
+      # Persist JetStream so queued ingest jobs survive a broker restart (H-3) — without a
+      # volume the whole backlog is lost, orphaning docs the catalog still lists as queued.
+      - nats_data:/data
     ports: ["127.0.0.1:4222:4222"]
+    restart: unless-stopped
 
   postgres:
     image: postgres:16
@@ -73,12 +77,14 @@ services:
       - pg_data:/var/lib/postgresql/data
       - ./sql/catalog_init.sql:/docker-entrypoint-initdb.d/catalog_init.sql:ro
     ports: ["127.0.0.1:5432:5432"]
+    restart: unless-stopped
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.111.0
     command: ["--config=/etc/otel-collector.yaml"]
     volumes:
       - ./otel-collector.yaml:/etc/otel-collector.yaml:ro
+    restart: unless-stopped
 
   # ---- local LLM serving (Ollama; OpenAI-compatible at /v1) ----
   # On-demand multi-model load by name: the router sends per-task model names and Ollama
@@ -212,3 +218,4 @@ volumes:
   kuzu_data:
   ollama_data:
   pg_data:
+  nats_data:

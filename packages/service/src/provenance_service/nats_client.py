@@ -7,6 +7,7 @@ ingestion trace stays unbroken across the queue.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from collections.abc import Awaitable, Callable
@@ -144,17 +145,27 @@ class NatsBus:
             await self.subscribe(subject, handler, queue)
             return
         run = self._traced_handler(subject, handler)
+        # nats-py awaits the callback before pulling the next message, so awaiting the whole
+        # saga inline processes documents strictly one-at-a-time — max_ack_pending only buffers
+        # deliveries, it never adds parallelism. Spawn each saga as a task (bounded by a
+        # semaphore = the ack-pending limit) so N documents ingest concurrently and keep the
+        # extraction LLM's batch fed. ack/nak still happen only after the saga finishes (H-3).
+        sem = asyncio.Semaphore(_MAX_ACK_PENDING)
+
+        async def _process(msg: Msg) -> None:
+            async with sem:
+                try:
+                    await run(msg)
+                except Exception:  # handler blew up — leave unacked so JetStream redelivers
+                    log.exception("durable handler failed for %s; will redeliver", subject)
+                    with suppress(Exception):
+                        await msg.nak()
+                    return
+                with suppress(Exception):
+                    await msg.ack()  # saga completed → safe to remove the job from the stream
 
         async def _cb(msg: Msg) -> None:
-            try:
-                await run(msg)
-            except Exception:  # handler blew up — leave unacked so JetStream redelivers
-                log.exception("durable handler failed for %s; will redeliver", subject)
-                with suppress(Exception):
-                    await msg.nak()
-                return
-            with suppress(Exception):
-                await msg.ack()  # saga completed → safe to remove the job from the stream
+            asyncio.create_task(_process(msg))  # return at once → next message dispatched
 
         await self._js.subscribe(  # type: ignore[attr-defined]
             subject,
