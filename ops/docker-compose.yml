@@ -157,7 +157,16 @@ services:
   parse:
     <<: *service-base
     command: ["uvicorn", "provenance_services.parse:app", "--host", "0.0.0.0", "--port", "8000"]
-    environment: { <<: *service-env, service_name: parse }
+    # Cap each parse's CPU: OCR (onnxruntime/RapidOCR) otherwise grabs every core, so a few
+    # concurrent parses of large OCR-heavy 10-Ks oversubscribe the host (load spike). Bound
+    # the thread pools so N concurrent parses stay within the core budget.
+    environment:
+      <<: *service-env
+      service_name: parse
+      OMP_NUM_THREADS: ${PARSE_OMP_THREADS-4}
+      ONNXRUNTIME_INTRA_OP_NUM_THREADS: ${PARSE_OMP_THREADS-4}
+      OPENBLAS_NUM_THREADS: ${PARSE_OMP_THREADS-4}
+      MKL_NUM_THREADS: ${PARSE_OMP_THREADS-4}
 
   extraction:
     <<: *service-base
