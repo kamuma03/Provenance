@@ -7,13 +7,16 @@ are rendered with pypdfium2. (Docling + full PaddleOCR remain the richer Spark o
 
 from __future__ import annotations
 
+import os
 import threading
 from typing import Any
 
 from provenance_contracts import BBox
 
 OCR_ENGINE_ID = "rapidocr-onnxruntime"
-RENDER_SCALE = 2.0  # render pages at 2x for legible OCR
+# Render pages at 1.5x — legible for OCR while keeping bitmaps (and thus the onnxruntime
+# arena's peak, which it never returns to the OS) ~44% smaller than 2x. Override via env.
+RENDER_SCALE = float(os.environ.get("OCR_RENDER_SCALE", "1.5"))
 
 
 class OcrEngine:
@@ -24,35 +27,60 @@ class OcrEngine:
         if self._ocr is None:
             from rapidocr_onnxruntime import RapidOCR
 
-            self._ocr = RapidOCR()
+            # Disable onnxruntime's CPU BFC arena: it grows to the largest tensor it has seen
+            # and never releases it, so varying page sizes ratchet RSS up over a long run.
+            # Off = allocate per-inference (a little slower, but no unbounded working set).
+            try:
+                self._ocr = RapidOCR(
+                    det_use_cuda=False, cls_use_cuda=False, rec_use_cuda=False,
+                    intra_op_num_threads=int(os.environ.get("OMP_NUM_THREADS", "4")),
+                    enable_cpu_mem_arena=False,
+                )
+            except Exception:  # noqa: BLE001 - RapidOCR API varies by version; never fail init
+                # Older RapidOCR without these kwargs — fall back to defaults.
+                self._ocr = RapidOCR()
         return self._ocr
 
-    def ocr_pdf_page(self, content: bytes, page_index: int) -> list[tuple[str, BBox]]:
-        """Render one PDF page to an image and OCR it → (text, bbox) in PDF coordinates."""
+    def ocr_pdf_pages(
+        self, content: bytes, page_indices: list[int]
+    ) -> dict[int, list[tuple[str, BBox]]]:
+        """OCR several pages of one PDF, opening the document ONCE. Returns
+        ``{page_index: [(text, bbox), ...]}`` in PDF coordinates.
+
+        Opening once (vs once per page) avoids re-parsing a multi-MB PDF dozens of times,
+        which churned pypdfium2's native heap; render buffers are freed promptly to keep the
+        onnxruntime arena's peak — and thus RSS — small over a long run (memory-growth fix)."""
         import numpy as np
         import pypdfium2 as pdfium
 
+        engine = self._engine()
+        results: dict[int, list[tuple[str, BBox]]] = {}
         pdf = pdfium.PdfDocument(content)
         try:
-            page = pdf[page_index]
-            pw, ph = float(page.get_width()), float(page.get_height())  # PDF-point page size
-            pil = page.render(scale=RENDER_SCALE).to_pil()
+            for page_index in page_indices:
+                page = pdf[page_index]
+                pw, ph = float(page.get_width()), float(page.get_height())
+                arr = np.asarray(page.render(scale=RENDER_SCALE).to_pil())
+                result, _ = engine(arr)
+                del arr  # free the render buffer before the next page
+                out: list[tuple[str, BBox]] = []
+                for box, text, _conf in result or []:
+                    xs = [float(p[0]) for p in box]
+                    ys = [float(p[1]) for p in box]
+                    out.append((text, BBox(
+                        page=page_index,
+                        x0=min(xs) / RENDER_SCALE, y0=min(ys) / RENDER_SCALE,
+                        x1=max(xs) / RENDER_SCALE, y1=max(ys) / RENDER_SCALE,
+                        page_width=pw, page_height=ph,  # dims for citation scaling (L-10)
+                    )))
+                results[page_index] = out
         finally:
             pdf.close()
+        return results
 
-        result, _ = self._engine()(np.array(pil))
-        out: list[tuple[str, BBox]] = []
-        for box, text, _conf in result or []:
-            xs = [float(p[0]) for p in box]
-            ys = [float(p[1]) for p in box]
-            bbox = BBox(
-                page=page_index,
-                x0=min(xs) / RENDER_SCALE, y0=min(ys) / RENDER_SCALE,
-                x1=max(xs) / RENDER_SCALE, y1=max(ys) / RENDER_SCALE,
-                page_width=pw, page_height=ph,  # carry page dims for citation scaling (L-10)
-            )
-            out.append((text, bbox))
-        return out
+    def ocr_pdf_page(self, content: bytes, page_index: int) -> list[tuple[str, BBox]]:
+        """Single-page convenience wrapper over ocr_pdf_pages (kept for callers/tests)."""
+        return self.ocr_pdf_pages(content, [page_index]).get(page_index, [])
 
 
 _ENGINE: OcrEngine | None = None

@@ -110,8 +110,10 @@ def parse_pdf_bytes(content: bytes, *, enable_ocr: bool = True) -> ParseResult:
         from .ocr_engine import get_ocr
 
         ocr = get_ocr()
-        for pidx in image_pages:
-            for text, bbox in ocr.ocr_pdf_page(content, pidx):
+        # Open the PDF once for all image pages (not once per page) to avoid re-parsing a
+        # multi-MB document dozens of times per doc (memory-growth fix).
+        for pidx, items in ocr.ocr_pdf_pages(content, image_pages).items():
+            for text, bbox in items:
                 raw.append((pidx, bbox.y0, bbox.x0, ElementType.TEXT, text, bbox))
                 ocr_used = True
 
